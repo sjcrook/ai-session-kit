@@ -1,0 +1,5 @@
+.env
+docs/.auto-continue.log
+docs/.auto-continue.pid
+docs/.handoff-notifications.log
+.github/auto-continue-enabled
