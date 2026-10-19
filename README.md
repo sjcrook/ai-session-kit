@@ -25,22 +25,22 @@ template/                  scaffold payload + installer
     .github/
       prompts/             /functional-spec, /technical-spec, /tasks, /handoff
       agents/              planner, implementer, handoff-writer (scoped tool access per role)
-      hooks/               Stop hook wiring (hardcoded to vendor/ai-session-kit/scripts/check-handoff.sh)
+      hooks/               Stop hook wiring (hardcoded to external/ai-session-kit/scripts/check-handoff.sh)
 ```
 
 ## Install
 
-Vendor this repo at **exactly** `vendor/ai-session-kit` in the consuming project — the scaffolded Stop hook hardcodes that path.
+Vendor this repo at **exactly** `external/ai-session-kit` in the consuming project — the scaffolded Stop hook hardcodes that path.
 
 ```bash
-git submodule add <this-repo-url> vendor/ai-session-kit
+git submodule add <this-repo-url> external/ai-session-kit
 git submodule update --init --recursive
 ```
 
 Then scaffold the host-owned files into the project root:
 
 ```bash
-vendor/ai-session-kit/template/create-scaffold-kit.sh
+external/ai-session-kit/template/create-scaffold-kit.sh
 ```
 
 Run it from the consuming project's repo root (or pass a target directory as the first argument). It's safe to re-run any time:
@@ -136,12 +136,12 @@ Deny-lists (`git push`, `rm -rf`, etc.) are applied on a best-effort basis per C
 Pull upstream changes into a consuming project, from the consumer's repo root:
 
 ```bash
-git submodule update --remote vendor/ai-session-kit   # fetches + fast-forwards to the submodule's remote HEAD
-git add vendor/ai-session-kit                          # stage the new commit pointer
+git submodule update --remote external/ai-session-kit   # fetches + fast-forwards to the submodule's remote HEAD
+git add external/ai-session-kit                          # stage the new commit pointer
 git commit -m "chore: update ai-session-kit"           # the pointer bump is a real commit in the consumer repo
 ```
 
-`--remote` is the key flag — a plain `git submodule update` alone re-checks-out whatever commit the consumer repo currently *points at*, it won't move that pointer forward on its own. Equivalently, from inside the submodule itself: `cd vendor/ai-session-kit && git pull && cd - && git add vendor/ai-session-kit && git commit`.
+`--remote` is the key flag — a plain `git submodule update` alone re-checks-out whatever commit the consumer repo currently *points at*, it won't move that pointer forward on its own. Equivalently, from inside the submodule itself: `cd external/ai-session-kit && git pull && cd - && git add external/ai-session-kit && git commit`.
 
 Either way, re-run `create-scaffold-kit.sh` afterward to pick up new/changed host-owned files — it won't clobber anything you've customized (see Install).
 

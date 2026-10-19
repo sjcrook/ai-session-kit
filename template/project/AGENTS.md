@@ -12,7 +12,7 @@
 ## Ending a Session
 - Update `docs/tasks.md` (check off completed items, mark blockers).
 - Update `docs/handoff.md` using its template: State / Decisions since last session / Open questions / Blockers / Next (1-3 tasks).
-- A `Stop` hook (`.github/hooks/handoff-check.json`) checks `docs/tasks.md` for `BLOCKED` items and notifies via `notify.sh` — see `vendor/ai-session-kit/scripts/check-handoff.sh`. Implement `notify.sh` with a real notification (email/Slack/etc); it's a stub until you do.
+- A `Stop` hook (`.github/hooks/handoff-check.json`) checks `docs/tasks.md` for `BLOCKED` items and notifies via `notify.sh` — see `external/ai-session-kit/scripts/check-handoff.sh`. Implement `notify.sh` with a real notification (email/Slack/etc); it's a stub until you do.
 
 ## Token Efficiency
 - Keep each session scoped to 1-3 tasks.

@@ -3,7 +3,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "vendor/ai-session-kit/scripts/check-handoff.sh",
+        "command": "external/ai-session-kit/scripts/check-handoff.sh",
         "timeout": 15
       }
     ]

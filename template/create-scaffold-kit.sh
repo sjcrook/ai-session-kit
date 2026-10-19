@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Scaffolds AGENTS.md, .github/*, docs/*, and notify.sh into a consuming project.
-# Usage: vendor/ai-session-kit/template/create-scaffold-kit.sh [target-dir]
+# Usage: external/ai-session-kit/template/create-scaffold-kit.sh [target-dir]
 # Run from the consuming project's repo root; target defaults to the current directory.
-# Vendor this repo at exactly 'vendor/ai-session-kit' -- the scaffolded Stop hook hardcodes that path.
+# Vendor this repo at exactly 'external/ai-session-kit' -- the scaffolded Stop hook hardcodes that path.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -81,4 +81,4 @@ echo ""
 echo "Next steps:"
 echo "  1. Fill in docs/functional-spec.md, then docs/technical-spec.md, then use the /tasks prompt to populate docs/tasks.md."
 echo "  2. Implement notify.sh with a real notification (email/Slack/etc)."
-echo "  3. Confirm this repo is vendored at exactly 'vendor/ai-session-kit' (the Stop hook hardcodes that path)."
+echo "  3. Confirm this repo is vendored at exactly 'external/ai-session-kit' (the Stop hook hardcodes that path)."

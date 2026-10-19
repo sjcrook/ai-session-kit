@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Notification stub called by vendor/ai-session-kit/scripts/check-handoff.sh as:
+# Notification stub called by external/ai-session-kit/scripts/check-handoff.sh as:
 #   ./notify.sh "<subject>" "<message>"
 # Replace the TODO below with a real notification (email/Slack/etc). Until implemented,
 # this just logs so the Stop hook never fails.
