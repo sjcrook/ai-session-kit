@@ -12,10 +12,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TASKS_FILE="docs/tasks.md"
 LOG_FILE="docs/.auto-continue.log"
 PID_FILE="docs/.auto-continue.pid"
-MAX_ITERATIONS="${AUTO_CONTINUE_MAX_ITERATIONS:-3}"
+# Default of 10 is deliberately generous enough to clear a typical small
+# sprint backlog (e.g. 5 simple tasks) in a single run without needing to be
+# manually re-triggered, while still bounded (not unlimited) as a safety
+# rail. The no-progress check below provides a second, earlier safety net:
+# a stuck loop stops and notifies well before exhausting this cap. Override
+# with the AUTO_CONTINUE_MAX_ITERATIONS env var for direct/manual runs.
+MAX_ITERATIONS="${AUTO_CONTINUE_MAX_ITERATIONS:-10}"
 AUTO_CONTINUE_FLAG=".github/auto-continue-enabled"
 
 log() { echo "$(date -u +%FT%TZ) $*" >>"$LOG_FILE"; }
+
+# Concurrent-loop guard: if a previous auto-continue.sh is still running (its
+# PID file points at a live process), don't start a second one — two loops
+# racing on the same docs/tasks.md could both grab the same "next" task and
+# step on each other's edits. A leftover PID file from a crashed/killed
+# previous run (process no longer alive) is safe to clear and proceed past.
+if [[ -f "$PID_FILE" ]]; then
+  existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+    log "auto-continue: stopping — another instance is already running (pid $existing_pid)"
+    exit 0
+  fi
+  rm -f "$PID_FILE"
+fi
 
 echo "$$" >"$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
@@ -36,22 +56,52 @@ if [[ "$CLI" != "copilot" && "$CLI" != "cline" ]] || ! command -v "$CLI" >/dev/n
   exit 0
 fi
 
-PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next unchecked, non-BLOCKED task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md. Write a failing test first, then the minimal implementation, then check the task off. Update docs/handoff.md before finishing. If you cannot complete the task, mark it BLOCKED: <reason> in docs/tasks.md instead of guessing."
+PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Write a failing test first, then the minimal implementation, then set its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
 
 # Runs one iteration with the selected CLI; leaves its exit code in $ret.
 run_agent_cli() {
   case "$CLI" in
   copilot)
+    # --agent implementer: explicitly identifies this invocation as the
+    # implementer persona (.github/agents/implementer.agent.md, always
+    # present from the scaffold) rather than running unscoped — mirrors the
+    # explicit role=implementer reset the cline branch below performs.
+    #
+    # NOTE on --deny-tool syntax: confirmed empirically that a trailing `*`
+    # glob (e.g. 'shell(rm -rf*)', what this repo used previously) only
+    # matches that exact literal string — a real `rm -rf <anything>` call
+    # was NOT blocked by it. The working wildcard syntax is a `:*` suffix
+    # (e.g. 'shell(rm -rf:*)'), confirmed empirically to actually block the
+    # command. This was a pre-existing, silent no-op bug, not specific to
+    # auto-continue's use of it.
     copilot -p "$PROMPT" \
+      --agent implementer \
       --allow-all-tools \
-      --deny-tool='shell(git push*)' \
-      --deny-tool='shell(rm -rf*)' \
+      --deny-tool='shell(git push:*)' \
+      --deny-tool='shell(rm -rf:*)' \
+      --deny-tool='shell(sudo:*)' \
       -s >>"$LOG_FILE" 2>&1
     ;;
   cline)
+    # This invocation always needs real shell access to implement tasks, so
+    # clear any role restriction a previous interactive session left behind
+    # in .cline/.active-role (see scripts/cline-tool-guard.sh) before running —
+    # otherwise a session that last used the planner or handoff-writer role
+    # would leave the continuation loop wrongly blocked from running shell
+    # commands at all.
+    mkdir -p .cline
+    printf 'implementer' >.cline/.active-role
+
     # Headless mode triggers automatically because stdout is redirected below.
-    CLINE_COMMAND_PERMISSIONS='{"deny": ["git push*", "rm -rf*", "sudo *"]}' \
-      cline --auto-approve true "$PROMPT" >>"$LOG_FILE" 2>&1
+    # NOTE: deny-listing dangerous commands here via an env var doesn't work —
+    # confirmed empirically that CLINE_COMMAND_PERMISSIONS has no effect; the
+    # Cline CLI has no built-in command allow/deny list. The equivalent of
+    # Copilot's --deny-tool above is the scaffolded PreToolUse hook
+    # (.cline/hooks/PreToolUse.sh / .clinerules/hooks/PreToolUse, both backed
+    # by scripts/cline-tool-guard.sh), which actually cancels matching tool
+    # calls and applies to every Cline session in the project, not just this
+    # one invocation.
+    cline --auto-approve true "$PROMPT" >>"$LOG_FILE" 2>&1
     ;;
   esac
   ret=$?
@@ -59,14 +109,40 @@ run_agent_cli() {
 
 log "auto-continue: started (max $MAX_ITERATIONS iterations, cli=$CLI)"
 
+prev_tasks_content=""
+stale_count=0
+
 for ((i = 1; i <= MAX_ITERATIONS; i++)); do
-  if grep -q '^- \[ \].*BLOCKED' "$TASKS_FILE"; then
-    log "auto-continue: stopping — BLOCKED task found after iteration $((i - 1))"
+  # Task rows start "| S<sprint> | T<task> |" — anchored so this doesn't also match the legend line.
+  if grep -qE '^\| *S[0-9]+ *\| *T[0-9]+ *\|.*Blocked' "$TASKS_FILE"; then
+    log "auto-continue: stopping — Blocked task found after iteration $((i - 1))"
     "$SCRIPT_DIR/check-handoff.sh" >>"$LOG_FILE" 2>&1
     exit 0
   fi
-  if ! grep -q '^- \[ \]' "$TASKS_FILE"; then
-    log "auto-continue: stopping — no unchecked tasks remain"
+  if ! grep -E '^\| *S[0-9]+ *\| *T[0-9]+ *\|' "$TASKS_FILE" | grep -q -v 'Done'; then
+    log "auto-continue: stopping — no unfinished tasks remain"
+    exit 0
+  fi
+
+  # No-progress safety net: compare the whole file's content (not just a
+  # remaining-count) across iterations, so a task legitimately left
+  # "In Progress (depends on T0XX)" — real but incomplete progress — doesn't
+  # look identical to a genuinely stuck loop that changed nothing at all. Two
+  # consecutive iterations with byte-identical docs/tasks.md, despite the CLI
+  # reporting success each time, means something is wrong (confused model,
+  # task it can't actually act on, etc.) — stop and notify well before
+  # burning the full MAX_ITERATIONS budget on a stuck loop.
+  current_tasks_content="$(cat "$TASKS_FILE" 2>/dev/null || true)"
+  if [[ "$i" -gt 1 && "$current_tasks_content" == "$prev_tasks_content" ]]; then
+    stale_count=$((stale_count + 1))
+  else
+    stale_count=0
+  fi
+  if [[ "$stale_count" -ge 2 ]]; then
+    log "auto-continue: stopping — $TASKS_FILE unchanged for 2 consecutive iterations (no real progress)"
+    if [[ -x ./notify.sh ]]; then
+      ./notify.sh "Auto-continue made no progress" "auto-continue stopped after $i iterations: $TASKS_FILE's content didn't change for 2 consecutive iterations even though the $CLI CLI reported success each time. See docs/.auto-continue.log." || true
+    fi
     exit 0
   fi
 
@@ -82,6 +158,11 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
     fi
     exit 0
   fi
+
+  prev_tasks_content="$current_tasks_content"
 done
 
 log "auto-continue: stopping — reached MAX_ITERATIONS ($MAX_ITERATIONS)"
+if [[ -x ./notify.sh ]]; then
+  ./notify.sh "Auto-continue reached its iteration cap" "auto-continue stopped after $MAX_ITERATIONS iterations with unfinished tasks still remaining in $TASKS_FILE. Re-trigger it (e.g. end another session with auto-continue still enabled) for another batch, or raise AUTO_CONTINUE_MAX_ITERATIONS. See docs/.auto-continue.log." || true
+fi
