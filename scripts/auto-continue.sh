@@ -38,7 +38,14 @@ if [[ -f "$PID_FILE" ]]; then
 fi
 
 echo "$$" >"$PID_FILE"
-trap 'rm -f "$PID_FILE"' EXIT
+CLI_OUTPUT=""
+cleanup() {
+  rm -f "$PID_FILE"
+  if [[ -n "$CLI_OUTPUT" ]]; then
+    rm -f "$CLI_OUTPUT"
+  fi
+}
+trap cleanup EXIT
 
 CLI="${AUTO_CONTINUE_CLI:-}"
 if [[ -z "$CLI" && -f "$AUTO_CONTINUE_FLAG" ]]; then
@@ -56,10 +63,19 @@ if [[ "$CLI" != "copilot" && "$CLI" != "cline" ]] || ! command -v "$CLI" >/dev/n
   exit 0
 fi
 
-PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Write a failing test first, then the minimal implementation, then set its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
+if [[ "$CLI" == "cline" ]]; then
+  if ! CLI_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/ai-session-kit-cline.XXXXXX")"; then
+    log "auto-continue: stopping — could not create a temporary Cline output file"
+    exit 1
+  fi
+fi
 
-# Runs one iteration with the selected CLI; leaves its exit code in $ret.
+PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Use file-editing tools to create or edit source and tests, not shell heredocs: the command guard scans the entire shell payload, including file content. Do not bypass a denied command. Write a failing test first, then the minimal implementation, then set its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
+
+# Runs one iteration; preserves the CLI exit code and detects Cline aborts,
+# which can be reported in output even when the process exits successfully.
 run_agent_cli() {
+  cli_aborted=false
   case "$CLI" in
   copilot)
     # --agent implementer: explicitly identifies this invocation as the
@@ -81,6 +97,7 @@ run_agent_cli() {
       --deny-tool='shell(rm -rf:*)' \
       --deny-tool='shell(sudo:*)' \
       -s >>"$LOG_FILE" 2>&1
+    ret=$?
     ;;
   cline)
     # This invocation always needs real shell access to implement tasks, so
@@ -101,10 +118,21 @@ run_agent_cli() {
     # by scripts/cline-tool-guard.sh), which actually cancels matching tool
     # calls and applies to every Cline session in the project, not just this
     # one invocation.
-    cline --auto-approve true "$PROMPT" >>"$LOG_FILE" 2>&1
+    cline --auto-approve true "$PROMPT" 2>&1 | tee "$CLI_OUTPUT" >>"$LOG_FILE"
+    local pipeline_status=("${PIPESTATUS[@]}")
+    ret="${pipeline_status[0]}"
+    if [[ "${pipeline_status[1]}" -ne 0 ]]; then
+      log "auto-continue: stopping — could not capture Cline output"
+      exit 1
+    fi
+    # Strip terminal colors and inspect only this invocation, not aborts from
+    # earlier sessions in the append-only log. Do not short-circuit grep: under
+    # pipefail that could make sed's SIGPIPE hide a matching abort.
+    if sed $'s/\033\\[[0-9;]*m//g' "$CLI_OUTPUT" | grep -E '^[[:space:]]*\[abort\]' >/dev/null; then
+      cli_aborted=true
+    fi
     ;;
   esac
-  ret=$?
 }
 
 log "auto-continue: started (max $MAX_ITERATIONS iterations, cli=$CLI)"
@@ -149,6 +177,14 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
   log "auto-continue: iteration $i — invoking $CLI CLI"
   run_agent_cli
   log "auto-continue: iteration $i finished with exit code $ret"
+
+  if [[ "$cli_aborted" == true ]]; then
+    log "auto-continue: stopping — $CLI CLI reported an abort (exit code $ret); task completion was interrupted"
+    if [[ -x ./notify.sh ]]; then
+      ./notify.sh "Auto-continue CLI aborted" "Cline reported an abort during auto-continue iteration $i (exit code $ret). This is not successful task completion. Check docs/.auto-continue.log and Cline's session diagnostics for the cancellation source before restarting; do not run competing clients against the same session." || true
+    fi
+    exit 1
+  fi
 
   if [[ $ret -ne 0 ]]; then
     log "auto-continue: stopping — $CLI CLI returned non-zero"

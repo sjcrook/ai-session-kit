@@ -35,6 +35,12 @@ tool_name="$(printf '%s' "$payload" | sed -n 's/.*"toolName"[[:space:]]*:[[:spac
 role="$(tr -d '[:space:]' <"$ROLE_FILE" 2>/dev/null || true)"
 
 deny() {
+  local diagnostic="$(date -u +%FT%TZ) cline-tool-guard: denied tool=$tool_name role=${role:-none}: $1"
+  if [[ -d docs ]]; then
+    printf '%s\n' "$diagnostic" >>docs/.auto-continue.log || printf '%s\n' "$diagnostic" >&2
+  else
+    printf '%s\n' "$diagnostic" >&2
+  fi
   echo "{\"cancel\": true, \"errorMessage\": \"$1\"}"
   exit 0
 }
@@ -52,7 +58,7 @@ if [[ "$tool_name" == "run_commands" || "$tool_name" == "execute_command" ]]; th
   # to hand-parse a JSON command array without a jq dependency this repo
   # doesn't otherwise require).
   if printf '%s' "$payload" | grep -Eiq 'git[[:space:]]+push|rm[[:space:]]+-rf|sudo[[:space:]]'; then
-    deny "Command matches a denied pattern (git push / rm -rf / sudo)."
+    deny "Command matches a denied pattern (git push / rm -rf / sudo). For file content, use the editor tool instead of a shell heredoc; do not bypass the deny-list."
   fi
 fi
 

@@ -208,6 +208,39 @@ Env var overrides (only take effect on manual/direct runs of `auto-continue.sh`,
 
 Each loop iteration is one separate headless CLI invocation; the agent is prompted to work on one task per invocation. The default limit is 10 invocations. Lower the limit for smaller batches.
 
+### Cline stops without completing a task
+
+If the log contains `[abort] aborted by another client`, Cline interrupted the task;
+it did not complete it, even if its process returned exit code 0. Auto-continue
+detects Cline's `[abort]` output, stops immediately with exit code 1, and calls
+`notify.sh` with "Auto-continue CLI aborted" instead of retrying until the
+no-progress limit. The task status is left intact for the next session to verify.
+
+The message alone does not identify a competing client or prove one exists.
+First look for `cline-tool-guard: denied` in `docs/.auto-continue.log`. The guard
+records the tool, role and denial reason, without logging the raw payload.
+It conservatively scans the whole shell payload: a heredoc writing a test
+containing `rm -rf` is denied even though it only writes that text. Use the
+editor tool for source/test edits and shell tools for running tests. Do not
+disable or work around the deny-list. The continuation prompt and scaffolded
+`AGENTS.md` both describe this workflow; merge that guidance into existing
+consumer instructions when updating the scaffold.
+
+If there is no corresponding denial, check Cline's session diagnostics and
+installed CLI version in the environment running auto-continue. Avoid
+opening/resuming the same session from another client while the headless run is
+active; an idle chat window alone does not prove a conflict. Resolve the
+cancellation source before restarting; increasing the iteration cap will not fix
+interrupted tasks.
+
+If the log instead says "no supported CLI found", install/authenticate the CLI
+and check its `PATH` in that same environment (for example, inside the Dev
+Container, not just on the host).
+
+Maintainers can run `bash tests/auto-continue.sh` and
+`bash tests/cline-tool-guard.sh` for offline regression checks using mock CLIs
+and guard payloads; no provider credentials or real agent runs are required.
+
 ### Task-table conventions auto-continue (and every session) relies on
 
 See `docs/tasks.md`'s own legend for the full wording — summarized here because it affects how `scripts/lib/handoff-core.sh` and `auto-continue.sh` interpret the file:
