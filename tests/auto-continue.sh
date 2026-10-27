@@ -16,6 +16,13 @@ mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/docs" "$TEST_ROOT/.github" "$TEST_ROOT/.cl
 
 cat >"$TEST_ROOT/bin/cline" <<'MOCK'
 #!/usr/bin/env bash
+for guidance in 'including temporary cleanup and test setup' \
+  'Never retry or disguise a denied operation' 'Cancellation is not completion'; do
+  if [[ "$*" != *"$guidance"* ]]; then
+    echo "Missing continuation prompt guidance: $guidance" >&2
+    exit 99
+  fi
+done
 echo call >>calls
 case "$MOCK_MODE" in
   abort) printf '\033[2m[abort] aborted by another client\033[0m\n'; exit 0 ;;

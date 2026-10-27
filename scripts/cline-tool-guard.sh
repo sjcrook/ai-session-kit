@@ -35,13 +35,19 @@ tool_name="$(printf '%s' "$payload" | sed -n 's/.*"toolName"[[:space:]]*:[[:spac
 role="$(tr -d '[:space:]' <"$ROLE_FILE" 2>/dev/null || true)"
 
 deny() {
-  local diagnostic="$(date -u +%FT%TZ) cline-tool-guard: denied tool=$tool_name role=${role:-none}: $1"
+  local reason="$1 The entire tool call was rejected, including all commands in a batch; Cline may end the active task. Do not retry or disguise the denied operation."
+  local diagnostic="$(date -u +%FT%TZ) cline-tool-guard: denied tool=$tool_name role=${role:-none}: $reason"
+  local location="See hook stderr for the diagnostic."
   if [[ -d docs ]]; then
-    printf '%s\n' "$diagnostic" >>docs/.auto-continue.log || printf '%s\n' "$diagnostic" >&2
+    if printf '%s\n' "$diagnostic" >>docs/.auto-continue.log; then
+      location="See docs/.auto-continue.log for the diagnostic."
+    else
+      printf '%s\n' "cline-tool-guard: could not write docs/.auto-continue.log" "$diagnostic" >&2
+    fi
   else
     printf '%s\n' "$diagnostic" >&2
   fi
-  echo "{\"cancel\": true, \"errorMessage\": \"$1\"}"
+  echo "{\"cancel\": true, \"errorMessage\": \"$reason $location\"}"
   exit 0
 }
 
@@ -57,9 +63,16 @@ if [[ "$tool_name" == "run_commands" || "$tool_name" == "execute_command" ]]; th
   # deliberately conservative (it can over-block) rather than fragile (trying
   # to hand-parse a JSON command array without a jq dependency this repo
   # doesn't otherwise require).
-  if printf '%s' "$payload" | grep -Eiq 'git[[:space:]]+push|rm[[:space:]]+-rf|sudo[[:space:]]'; then
-    deny "Command matches a denied pattern (git push / rm -rf / sudo). For file content, use the editor tool instead of a shell heredoc; do not bypass the deny-list."
-  fi
+  for rule in 'git push' 'rm -rf' 'sudo'; do
+    case "$rule" in
+      'git push') pattern='git[[:space:]]+push' ;;
+      'rm -rf') pattern='rm[[:space:]]+-rf' ;;
+      sudo) pattern='sudo[[:space:]]' ;;
+    esac
+    if printf '%s' "$payload" | grep -Ei "$pattern" >/dev/null; then
+      deny "Command matches a denied pattern: $rule. This applies to temporary cleanup and file content too. Use file-editing tools for source/test content; if no permitted workflow exists, report the blocker."
+    fi
+  done
 fi
 
 echo '{"cancel": false}'

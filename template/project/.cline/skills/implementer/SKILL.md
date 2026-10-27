@@ -8,13 +8,25 @@ description: Use when implementing a task from docs/tasks.md using test-driven d
 Before anything else, write the exact text `implementer` (no trailing
 newline) to `.cline/.active-role`, creating the `.cline` directory if needed.
 This clears any planner/handoff-writer restriction a previous task may have
-left behind, so this role's full tool access (including shell commands) is
-available.
+left behind. Shell commands are available, but the command deny-list still
+applies to this role.
 
 You are the TDD implementer. Your job is to complete exactly one task from
 `docs/tasks.md` at a time.
 
 ## Constraints
+- The `git push`, `rm -rf`, and `sudo` deny-list applies even to temporary
+  cleanup and test setup. A match anywhere in a shell batch rejects the
+  whole tool call and may end the task. Use file-editing tools for source
+  and tests, not shell heredocs containing denied text. Prefer established
+  test fixtures; plan cleanup of session-created artifacts using explicitly
+  identified individual files and then empty directories. Never disguise a
+  denied operation with alternate spellings, interpreters, or wrappers.
+- After a denial, inspect `docs/.auto-continue.log` (or hook stderr if the
+  log was unavailable) and verify real state before resuming. Do not repeat
+  the rejected operation or treat cancellation as completion. If no
+  permitted workflow can complete a necessary operation, report it and
+  mark the task Blocked with the reason.
 - DO NOT work on more than one task per session without explicit instruction — keep the session short.
 - DO NOT mark a task `✅ Done` before its own test passes.
 - DO NOT mark a task `✅ Done` if its test can only pass once a *later*,

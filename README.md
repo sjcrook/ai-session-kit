@@ -218,13 +218,49 @@ no-progress limit. The task status is left intact for the next session to verify
 
 The message alone does not identify a competing client or prove one exists.
 First look for `cline-tool-guard: denied` in `docs/.auto-continue.log`. The guard
-records the tool, role and denial reason, without logging the raw payload.
-It conservatively scans the whole shell payload: a heredoc writing a test
-containing `rm -rf` is denied even though it only writes that text. Use the
-editor tool for source/test edits and shell tools for running tests. Do not
-disable or work around the deny-list. The continuation prompt and scaffolded
-`AGENTS.md` both describe this workflow; merge that guidance into existing
-consumer instructions when updating the scaffold.
+records the tool, role and specific matched rule (`git push`, `rm -rf`, or
+`sudo`), without logging the raw payload. If several rules match, it reports
+the first in that order. If `docs/` is absent or the log cannot be written,
+the diagnostic goes to hook stderr instead; the hook response identifies
+which destination was used.
+
+The guard conservatively scans the whole shell payload. Both direct temporary
+cleanup using `rm -rf` and a heredoc writing a test containing that text are
+denied. A match anywhere rejects the entire tool call, including all commands
+in a batch, before those commands run. The guard returns `cancel: true`; in the
+observed Cline workflow this can end the active task, rather than give the model
+another turn to recover. A cancellation or a lifecycle hook displaying
+"Completed" is not evidence that the implementation finished.
+
+To prevent repeated cancellations:
+
+- Use the editor tool for source/test edits and shell tools for running tests.
+- Plan temporary artifacts and cleanup before running a batch. Prefer existing
+  test fixtures and their established cleanup conventions. For session-created
+  artifacts, use explicitly identified individual files and then empty
+  directories for permitted cleanup; do not translate a denied recursive
+  deletion into another spelling, interpreter, or wrapper.
+- After a denial, read the diagnostic and verify actual repository state before
+  resuming. Do not repeat the rejected operation. If no permitted workflow can
+  complete a necessary operation, explain it and mark the task Blocked.
+
+The continuation prompt, scaffolded `AGENTS.md`, and Cline implementer skill
+describe this workflow. Disabling auto-continue does not disable the guard.
+This diagnostic improvement does not change the deny-list, automatically retry
+cancelled tasks, or change which lifecycle events can start auto-continue.
+
+#### Recoverable rejection: separate interface, not enabled here
+
+The current [Cline hooks documentation](https://docs.cline.bot/customization/hooks)
+points to [SDK plugins](https://docs.cline.bot/sdk/plugins). That API documents
+`beforeTool` returning `{ skip: true, reason }` to block a call and send its reason
+back to the model. This is a different interface from this kit's shell
+`PreToolUse` response (`cancel` / `errorMessage`). It does not establish that the
+same behavior is available through shell hooks in Cline 4.1.25, the version
+recorded in the investigated export, or on both CLI and extension surfaces.
+No hook-contract migration is included here. Such a change requires verifying
+version/surface support and explicit approval; returning `cancel: false` for a
+prohibited operation is not a recovery mechanism.
 
 If there is no corresponding denial, check Cline's session diagnostics and
 installed CLI version in the environment running auto-continue. Avoid
@@ -261,6 +297,13 @@ git commit -m "chore: update ai-session-kit"           # the pointer bump is a r
 `--remote` is the key flag — a plain `git submodule update` alone re-checks-out whatever commit the consumer repo currently *points at*, it won't move that pointer forward on its own. Equivalently, from inside the submodule itself: `cd external/ai-session-kit && git pull && cd - && git add external/ai-session-kit && git commit`.
 
 Either way, re-run `create-scaffold-kit.sh` afterward to pick up new/changed host-owned files — it won't clobber anything you've customized (see Install).
+
+For the guard-denial guidance, merge changes to `AGENTS.md` and
+`.cline/skills/implementer/SKILL.md` if the installer reports existing differences.
+The guard and continuation prompt come from the updated vendored scripts;
+both `.cline/hooks/PreToolUse.sh` and `.clinerules/hooks/PreToolUse` must still
+point to that core for their respective Cline surfaces. Updating this kit alone
+does not update an existing consuming project's vendored revision or instructions.
 
 ## Notifications and permissions
 
