@@ -9,9 +9,10 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/command-policy.sh"
 TASKS_FILE="docs/tasks.md"
-LOG_FILE="docs/.auto-continue.log"
-PID_FILE="docs/.auto-continue.pid"
+LOG_FILE=".ai-session/auto-continue.log"
+PID_FILE=".ai-session/auto-continue.pid"
 # Default of 10 is deliberately generous enough to clear a typical small
 # sprint backlog (e.g. 5 simple tasks) in a single run without needing to be
 # manually re-triggered, while still bounded (not unlimited) as a safety
@@ -22,6 +23,16 @@ MAX_ITERATIONS="${AUTO_CONTINUE_MAX_ITERATIONS:-10}"
 AUTO_CONTINUE_FLAG=".github/auto-continue-enabled"
 
 log() { echo "$(date -u +%FT%TZ) $*" >>"$LOG_FILE"; }
+
+if ! mkdir -p .ai-session; then
+  echo "Cannot create .ai-session runtime directory." >&2
+  exit 1
+fi
+if ! touch "$LOG_FILE"; then
+  echo "Cannot write runtime log $LOG_FILE." >&2
+  exit 1
+fi
+echo "Auto-continue log: $LOG_FILE"
 
 # Concurrent-loop guard: if a previous auto-continue.sh is still running (its
 # PID file points at a live process), don't start a second one — two loops
@@ -71,12 +82,19 @@ if [[ "$CLI" == "cline" ]]; then
 fi
 
 PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Use file-editing tools to create or edit source and tests, not shell heredocs: the command guard scans the entire shell payload, including file content. Do not bypass a denied command. Write a failing test first, then the minimal implementation, then set its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
-PROMPT+=" The git push, rm -rf, and sudo deny-list applies to direct commands too, including temporary cleanup and test setup. A match anywhere in a batch rejects the entire tool call and may end the Cline task. Prefer established test fixtures; plan cleanup of session-created artifacts using explicitly identified individual files and then empty directories. Never retry or disguise a denied operation with alternate spellings, interpreters, or wrappers. When resuming after a denial, check docs/.auto-continue.log (or hook stderr if logging was unavailable) and verify real state. Cancellation is not completion; report a necessary operation with no permitted workflow as a blocker."
+PROMPT+=" The git push, rm -rf, and sudo deny-list applies to direct commands too, including temporary cleanup and test setup, unless the operator grants the corresponding named exception in command-exceptions/command-exceptions.conf. Never create, edit, or redirect that operator policy or its enforcement files. Using an operator-granted exception is permitted. An unapproved match anywhere in a batch rejects the entire tool call and may end the Cline task. Prefer established test fixtures; plan cleanup of session-created artifacts using explicitly identified individual files and then empty directories. Never retry or disguise a denied operation with alternate spellings, interpreters, or wrappers. When resuming after a denial, check .ai-session/auto-continue.log (or hook stderr if logging was unavailable) and verify real state; do not assume any rejected batch ran. After the operator changes permission, reassess only the affected blocker and rerun necessary validation. Cancellation is not completion; report a necessary operation with no permitted workflow as a blocker."
 
 # Runs one iteration; preserves the CLI exit code and detects Cline aborts,
 # which can be reported in output even when the process exits successfully.
 run_agent_cli() {
   cli_aborted=false
+  if ! command_policy_load; then
+    log "auto-continue: stopping — command policy error: $COMMAND_POLICY_ERROR"
+    if [[ -x ./notify.sh ]]; then
+      ./notify.sh "Auto-continue command policy error" "$COMMAND_POLICY_ERROR No agent was launched. Correct command-exceptions/command-exceptions.conf from the host before restarting." || log "auto-continue: policy error notification failed"
+    fi
+    exit 1
+  fi
   case "$CLI" in
   copilot)
     # --agent implementer: explicitly identifies this invocation as the
@@ -91,13 +109,16 @@ run_agent_cli() {
     # (e.g. 'shell(rm -rf:*)'), confirmed empirically to actually block the
     # command. This was a pre-existing, silent no-op bug, not specific to
     # auto-continue's use of it.
-    copilot -p "$PROMPT" \
-      --agent implementer \
-      --allow-all-tools \
-      --deny-tool='shell(git push:*)' \
-      --deny-tool='shell(rm -rf:*)' \
-      --deny-tool='shell(sudo:*)' \
-      -s >>"$LOG_FILE" 2>&1
+    local copilot_args=(-p "$PROMPT" --agent implementer --allow-all-tools -s)
+    local rule
+    for rule in 'git push' 'rm -rf' 'sudo'; do
+      if command_policy_allows "$rule"; then
+        log "auto-continue: copilot operator exception enabled: $rule (command-exceptions/command-exceptions.conf)"
+      else
+        copilot_args+=("--deny-tool=shell($rule:*)")
+      fi
+    done
+    copilot "${copilot_args[@]}" >>"$LOG_FILE" 2>&1
     ret=$?
     ;;
   cline)
@@ -170,7 +191,7 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
   if [[ "$stale_count" -ge 2 ]]; then
     log "auto-continue: stopping — $TASKS_FILE unchanged for 2 consecutive iterations (no real progress)"
     if [[ -x ./notify.sh ]]; then
-      ./notify.sh "Auto-continue made no progress" "auto-continue stopped after $i iterations: $TASKS_FILE's content didn't change for 2 consecutive iterations even though the $CLI CLI reported success each time. See docs/.auto-continue.log." || true
+      ./notify.sh "Auto-continue made no progress" "auto-continue stopped after $i iterations: $TASKS_FILE's content didn't change for 2 consecutive iterations even though the $CLI CLI reported success each time. See .ai-session/auto-continue.log." || true
     fi
     exit 0
   fi
@@ -182,7 +203,7 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
   if [[ "$cli_aborted" == true ]]; then
     log "auto-continue: stopping — $CLI CLI reported an abort (exit code $ret); task completion was interrupted"
     if [[ -x ./notify.sh ]]; then
-      ./notify.sh "Auto-continue CLI aborted" "Cline reported an abort during auto-continue iteration $i (exit code $ret). This is not successful task completion. Check docs/.auto-continue.log and Cline's session diagnostics for the cancellation source before restarting; do not run competing clients against the same session." || true
+      ./notify.sh "Auto-continue CLI aborted" "Cline reported an abort during auto-continue iteration $i (exit code $ret). This is not successful task completion. Check .ai-session/auto-continue.log and Cline's session diagnostics for the cancellation source before restarting; do not run competing clients against the same session." || true
     fi
     exit 1
   fi
@@ -191,7 +212,7 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
     log "auto-continue: stopping — $CLI CLI returned non-zero"
     # A CLI crash doesn't necessarily leave a BLOCKED task for check-handoff.sh to find, so notify directly.
     if [[ -x ./notify.sh ]]; then
-      ./notify.sh "Auto-continue CLI failed" "The $CLI CLI exited $ret during auto-continue iteration $i. See docs/.auto-continue.log." || true
+      ./notify.sh "Auto-continue CLI failed" "The $CLI CLI exited $ret during auto-continue iteration $i. See .ai-session/auto-continue.log." || true
     fi
     exit 0
   fi
@@ -201,5 +222,5 @@ done
 
 log "auto-continue: stopping — reached MAX_ITERATIONS ($MAX_ITERATIONS)"
 if [[ -x ./notify.sh ]]; then
-  ./notify.sh "Auto-continue reached its iteration cap" "auto-continue stopped after $MAX_ITERATIONS iterations with unfinished tasks still remaining in $TASKS_FILE. Re-trigger it (e.g. end another session with auto-continue still enabled) for another batch, or raise AUTO_CONTINUE_MAX_ITERATIONS. See docs/.auto-continue.log." || true
+  ./notify.sh "Auto-continue reached its iteration cap" "auto-continue stopped after $MAX_ITERATIONS iterations with unfinished tasks still remaining in $TASKS_FILE. Re-trigger it (e.g. end another session with auto-continue still enabled) for another batch, or raise AUTO_CONTINUE_MAX_ITERATIONS. See .ai-session/auto-continue.log." || true
 fi

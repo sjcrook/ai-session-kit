@@ -29,31 +29,40 @@
 set -uo pipefail
 
 ROLE_FILE=".cline/.active-role"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/command-policy.sh"
 
 payload="$(cat)"
 tool_name="$(printf '%s' "$payload" | sed -n 's/.*"toolName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
 role="$(tr -d '[:space:]' <"$ROLE_FILE" 2>/dev/null || true)"
 
-deny() {
-  local reason="$1 The entire tool call was rejected, including all commands in a batch; Cline may end the active task. Do not retry or disguise the denied operation."
-  local diagnostic="$(date -u +%FT%TZ) cline-tool-guard: denied tool=$tool_name role=${role:-none}: $reason"
-  local location="See hook stderr for the diagnostic."
-  if [[ -d docs ]]; then
-    if printf '%s\n' "$diagnostic" >>docs/.auto-continue.log; then
-      location="See docs/.auto-continue.log for the diagnostic."
+record_diagnostic() {
+  local diagnostic="$(date -u +%FT%TZ) cline-tool-guard: $1 tool=$tool_name role=${role:-none}: $2"
+  DIAGNOSTIC_LOCATION="See hook stderr for the diagnostic."
+  if mkdir -p .ai-session; then
+    if printf '%s\n' "$diagnostic" >>.ai-session/auto-continue.log; then
+      DIAGNOSTIC_LOCATION="See .ai-session/auto-continue.log for the diagnostic."
     else
-      printf '%s\n' "cline-tool-guard: could not write docs/.auto-continue.log" "$diagnostic" >&2
+      printf '%s\n' "cline-tool-guard: could not write .ai-session/auto-continue.log" "$diagnostic" >&2
     fi
   else
-    printf '%s\n' "$diagnostic" >&2
+    printf '%s\n' "cline-tool-guard: could not create .ai-session runtime directory" "$diagnostic" >&2
   fi
-  echo "{\"cancel\": true, \"errorMessage\": \"$reason $location\"}"
+}
+
+deny() {
+  local reason="$1 The entire tool call was rejected, including all commands in a batch; Cline may end the active task. Do not retry or disguise the denied operation."
+  record_diagnostic denied "$reason"
+  echo "{\"cancel\": true, \"errorMessage\": \"$reason $DIAGNOSTIC_LOCATION\"}"
   exit 0
 }
 
 if [[ "$tool_name" == "run_commands" || "$tool_name" == "execute_command" ]]; then
   if [[ "$role" == "planner" || "$role" == "handoff-writer" ]]; then
     deny "The '$role' role does not run shell commands — see .cline/skills/$role/SKILL.md."
+  fi
+  if ! command_policy_load; then
+    deny "Command policy error: $COMMAND_POLICY_ERROR No shell commands are permitted until the operator corrects the policy."
   fi
 
   # Deny-list safety net for every role (including implementer/none) — mirrors
@@ -63,6 +72,7 @@ if [[ "$tool_name" == "run_commands" || "$tool_name" == "execute_command" ]]; th
   # deliberately conservative (it can over-block) rather than fragile (trying
   # to hand-parse a JSON command array without a jq dependency this repo
   # doesn't otherwise require).
+  permitted_rules=()
   for rule in 'git push' 'rm -rf' 'sudo'; do
     case "$rule" in
       'git push') pattern='git[[:space:]]+push' ;;
@@ -70,8 +80,15 @@ if [[ "$tool_name" == "run_commands" || "$tool_name" == "execute_command" ]]; th
       sudo) pattern='sudo[[:space:]]' ;;
     esac
     if printf '%s' "$payload" | grep -Ei "$pattern" >/dev/null; then
-      deny "Command matches a denied pattern: $rule. This applies to temporary cleanup and file content too. Use file-editing tools for source/test content; if no permitted workflow exists, report the blocker."
+      if command_policy_allows "$rule"; then
+        permitted_rules+=("$rule")
+      else
+        deny "Command matches a denied pattern: $rule. This applies to temporary cleanup and file content too. Use file-editing tools for source/test content; ask the operator to review command-exceptions/command-exceptions.conf if permission is needed."
+      fi
     fi
+  done
+  for ((i = 0; i < ${#permitted_rules[@]}; i++)); do
+    record_diagnostic "allowed by operator exception" "${permitted_rules[i]} (command-exceptions/command-exceptions.conf)."
   done
 fi
 

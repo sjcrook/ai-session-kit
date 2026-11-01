@@ -11,6 +11,7 @@ TARGET_ROOT="$(cd "${1:-.}" && pwd)"
 COPIED=()
 SKIPPED_IDENTICAL=()
 MANUAL_MERGE=()
+PRESERVED_POLICY=()
 
 # Copies $1 (source file) to $TARGET_ROOT/$2 (relative dest path), asking before
 # overwriting anything that already exists and differs.
@@ -18,9 +19,13 @@ copy_one() {
   local src="$1" rel="$2"
   local dest="$TARGET_ROOT/$rel"
 
+  if [[ "$rel" == "command-exceptions/command-exceptions.conf" && ( -e "$dest" || -L "$dest" ) ]]; then
+    PRESERVED_POLICY+=("$rel")
+    return
+  fi
   if [[ ! -e "$dest" ]]; then
-    mkdir -p "$(dirname "$dest")"
-    cp "$src" "$dest"
+    mkdir -p "$(dirname "$dest")" || return 1
+    cp "$src" "$dest" || return 1
     [[ -x "$src" ]] && chmod +x "$dest"
     COPIED+=("$rel")
     return
@@ -37,8 +42,8 @@ copy_one() {
   fi
 
   if [[ "$reply" =~ ^[Yy]$ ]]; then
-    cp "$dest" "$dest.bak.$(date +%Y%m%d%H%M%S)"
-    cp "$src" "$dest"
+    cp "$dest" "$dest.bak.$(date +%Y%m%d%H%M%S)" || return 1
+    cp "$src" "$dest" || return 1
     [[ -x "$src" ]] && chmod +x "$dest"
     COPIED+=("$rel (overwritten, backup kept)")
   else
@@ -48,7 +53,10 @@ copy_one() {
 
 while IFS= read -r -d '' src; do
   rel="${src#"$SCRIPT_DIR"/project/}"
-  copy_one "$src" "$rel"
+  if ! copy_one "$src" "$rel"; then
+    echo "Failed to scaffold '$rel'." >&2
+    exit 1
+  fi
 done < <(find "$SCRIPT_DIR/project" -type f -print0)
 
 GI_SRC="$SCRIPT_DIR/gitignore.append"
@@ -67,6 +75,7 @@ echo ""
 echo "Scaffold complete."
 echo "  Copied: ${#COPIED[@]}"
 echo "  Already up to date: ${#SKIPPED_IDENTICAL[@]}"
+echo "  Operator policy preserved: ${#PRESERVED_POLICY[@]}"
 echo "  .gitignore lines added: $gitignore_added"
 
 if [[ ${#MANUAL_MERGE[@]} -gt 0 ]]; then
@@ -82,3 +91,4 @@ echo "Next steps:"
 echo "  1. Fill in docs/functional-spec.md, then docs/technical-spec.md, then use the /tasks prompt to populate docs/tasks.md."
 echo "  2. Implement notify.sh with a real notification (email/Slack/etc)."
 echo "  3. Confirm this repo is vendored at exactly 'external/ai-session-kit' (the Stop hook hardcodes that path)."
+echo "  4. Before unattended container use, mount command-exceptions/ and enforcement paths read-only; see the kit README."

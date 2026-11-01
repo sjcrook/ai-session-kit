@@ -3,7 +3,7 @@
 # Vendored, read-only — assumes invocation cwd is the project root.
 set -uo pipefail
 
-PID_FILE="docs/.auto-continue.pid"
+PID_FILE=".ai-session/auto-continue.pid"
 
 if [[ ! -f "$PID_FILE" ]]; then
   echo "No auto-continue PID file found; no loop is recorded as running."

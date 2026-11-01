@@ -14,7 +14,7 @@ handoff_core_run() {
   local tasks_file="docs/tasks.md"
   local handoff_file="docs/handoff.md"
   local notify_script="./notify.sh"
-  local log_file="docs/.handoff-notifications.log"
+  local log_file=".ai-session/handoff-notifications.log"
   local auto_continue_flag=".github/auto-continue-enabled"
 
   local blocked_lines=""
@@ -26,6 +26,11 @@ handoff_core_run() {
   fi
 
   if [[ -n "$blocked_lines" ]]; then
+    if ! mkdir -p .ai-session; then
+      HANDOFF_MESSAGE="Cannot create .ai-session runtime directory for blocker notifications."
+      printf '%s\n' "$HANDOFF_MESSAGE" >&2
+      return 1
+    fi
     local message="Session ended with blocked task(s) in $tasks_file:
 $blocked_lines
 
@@ -40,7 +45,11 @@ See $handoff_file for full context."
       echo "$(date -u +%FT%TZ) BLOCKED"
       echo "$message"
       echo "---"
-    } >>"$log_file"
+    } >>"$log_file" || {
+      HANDOFF_MESSAGE="Blocker detected, but could not write $log_file."
+      printf '%s\n' "$HANDOFF_MESSAGE" >&2
+      return 1
+    }
 
     HANDOFF_MESSAGE="Blocker detected in $tasks_file — notification attempted, logged to $log_file"
     return
@@ -56,6 +65,6 @@ See $handoff_file for full context."
   else
     nohup "$script_dir/auto-continue.sh" >/dev/null 2>&1 &
     disown
-    HANDOFF_MESSAGE="No blockers detected — auto-continue started in the background (see docs/.auto-continue.log)."
+    HANDOFF_MESSAGE="No blockers detected — auto-continue started in the background (see .ai-session/auto-continue.log)."
   fi
 }

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ai-session-kit-scaffold-test.XXXXXX")"
+trap 'find "$TEST_ROOT" -depth -delete' EXIT
+mkdir "$TEST_ROOT/project"
+project="$TEST_ROOT/project"
+policy="$project/command-exceptions/command-exceptions.conf"
+
+bash "$KIT_ROOT/template/create-scaffold-kit.sh" "$project" </dev/null >"$TEST_ROOT/output"
+cmp "$policy" "$KIT_ROOT/template/project/command-exceptions/command-exceptions.conf"
+grep -Fx '/command-exceptions/' "$project/.gitignore" >/dev/null
+grep -Fx '/.ai-session/' "$project/.gitignore" >/dev/null
+(
+  cd "$project"
+  source "$KIT_ROOT/scripts/lib/command-policy.sh"
+  command_policy_load
+  for rule in 'git push' 'rm -rf' sudo; do
+    ! command_policy_allows "$rule"
+  done
+)
+echo 'PASS: fresh scaffold creates a policy with no grants and ignores operator state'
+
+recovery_prompt=".github/prompts/recover-handoff.prompt.md"
+recovery_skill=".cline/skills/recover-handoff/SKILL.md"
+for path in "$recovery_prompt" "$recovery_skill"; do
+  cmp "$project/$path" "$KIT_ROOT/template/project/$path"
+  grep -F 'Do not run shell commands or tests.' "$project/$path" >/dev/null
+  grep -F '.ai-session/auto-continue.log' "$project/$path" >/dev/null
+  grep -F '.github/auto-continue-enabled' "$project/$path" >/dev/null
+  grep -F 'If evidence is missing or inaccessible, state that explicitly.' "$project/$path" >/dev/null
+done
+grep -Fx 'agent: handoff-writer' "$project/$recovery_prompt" >/dev/null
+grep -Fx 'name: recover-handoff' "$project/$recovery_skill" >/dev/null
+grep -F '`.cline/.active-role`' "$project/$recovery_skill" >/dev/null
+echo 'PASS: recovery prompt and skill are installed with evidence and no-shell constraints'
+
+resume_prompt=".github/prompts/prepare-resume.prompt.md"
+resume_skill=".cline/skills/prepare-resume/SKILL.md"
+for path in "$resume_prompt" "$resume_skill"; do
+  cmp "$project/$path" "$KIT_ROOT/template/project/$path"
+  for constraint in 'Require exactly one task ID' \
+    'command-exceptions/command-exceptions.conf' \
+    '.github/auto-continue-enabled' \
+    "Require the user's confirmation" \
+    'Every restricted class in the rejected batch needs' \
+    'Do not clear the entire handoff' \
+    'Ready to resume <task_id>' \
+    'Not ready to resume <task_id>' \
+    'do not mark Done'; do
+    grep -F "$constraint" "$project/$path" >/dev/null
+  done
+done
+grep -Fx 'agent: handoff-writer' "$project/$resume_prompt" >/dev/null
+grep -Fx 'name: prepare-resume' "$project/$resume_skill" >/dev/null
+grep -F '`.cline/.active-role`' "$project/$resume_skill" >/dev/null
+echo 'PASS: prepare-resume workflows are installed with targeted readiness safeguards'
+
+printf '# Operator approval\nallow-recursive-delete\n' >"$policy"
+cp "$policy" "$TEST_ROOT/approved-policy"
+bash "$KIT_ROOT/template/create-scaffold-kit.sh" "$project" </dev/null >"$TEST_ROOT/output"
+cmp "$policy" "$TEST_ROOT/approved-policy"
+grep -F 'Operator policy preserved: 1' "$TEST_ROOT/output" >/dev/null
+[[ "$(grep -Fxc '/command-exceptions/' "$project/.gitignore")" == 1 ]]
+[[ -z "$(find "$project/command-exceptions" -name '*.bak.*' -print)" ]]
+echo 'PASS: rerunning scaffold preserves approvals without prompting or backups'
+
+rm "$policy"
+bash "$KIT_ROOT/template/create-scaffold-kit.sh" "$project" </dev/null >"$TEST_ROOT/output"
+cmp "$policy" "$KIT_ROOT/template/project/command-exceptions/command-exceptions.conf"
+echo 'PASS: missing policy is recreated with default restrictions'

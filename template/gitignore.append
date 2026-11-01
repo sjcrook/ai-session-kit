@@ -1,6 +1,5 @@
 .env
-docs/.auto-continue.log
-docs/.auto-continue.pid
-docs/.handoff-notifications.log
+/.ai-session/
 .github/auto-continue-enabled
 .cline/.active-role
+/command-exceptions/

@@ -18,7 +18,7 @@
 # Registering all three guarantees this check still runs exactly once per
 # session end regardless of which surface or termination path was used, and
 # the underlying handoff_core_run logic is itself idempotent (re-reading
-# docs/tasks.md and docs/.auto-continue.pid-style state), so an edge case
+# docs/tasks.md and .ai-session/auto-continue.pid-style state), so an edge case
 # where more than one of these fires for the same termination is harmless.
 #
 # Vendored, read-only — assumes invocation cwd is the project root. Confirmed
