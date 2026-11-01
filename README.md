@@ -1,312 +1,373 @@
 # ai-session-kit
 
-A vendorable framework for spec-driven, sprint-based AI coding sessions in VS Code (GitHub Copilot) and Cline (VS Code extension or CLI): a functional/technical spec, a sprint task list, and a handoff doc carry context between sessions, with a session-end lifecycle hook (Copilot's `Stop` hook; Cline's `TaskComplete`/`TaskCancel`/`SessionShutdown` hooks) that detects blockers and can optionally keep going headlessly.
+Help your AI plan a project, work through tasks, and pick up where it left off.
+Use **GitHub Copilot** or **Cline**, supervise each session, or let the AI
+continue unattended until it finishes or needs help.
 
-This repo *is* the vendored core — you don't clone it standalone to use it, you vendor it into a real project (see Install).
+Use the kit alongside a **Dev Container**, especially for unattended work.
+[dev-container-config](https://github.com/sjcrook/dev-container-config) generates
+a restricted development environment that complements the kit: the kit organizes
+the AI's work, while the container limits its access to your host and provides a
+consistent toolchain. Configure read-only mounts to protect approvals and tooling.
+A container does not protect the writable workspace from changes or deletion, so
+limit exposed credentials and keep independent backups.
 
-## What's in here
+The kit adds instructions and four documents to your project:
 
-```
-scripts/                   vendored, read-only core
-  check-handoff.sh         Copilot Stop hook entry point: detects Blocked tasks, notifies, or starts auto-continue
-  check-handoff-cline.sh   Cline TaskComplete/TaskCancel/SessionShutdown hook entry point — same decision via lib/handoff-core.sh
-  cline-tool-guard.sh      Cline PreToolUse hook: enforces planner/handoff-writer no-shell restriction + a command deny-list
-  auto-continue.sh         headless continuation loop (GitHub Copilot CLI or Cline CLI)
-  stop-auto-continue.sh    stops a running auto-continue loop and its current CLI child
-  lib/handoff-core.sh      shared blocker-detection/notify/auto-continue-launch logic used by both hook entry points above
+| Document | What it answers |
+|---|---|
+| `docs/functional-spec.md` | What should we build? |
+| `docs/technical-spec.md` | How should it work? |
+| `docs/tasks.md` | What needs doing, and what is complete or blocked? |
+| `docs/handoff.md` | Where should the next session start? |
 
-template/                  scaffold payload + installer
-  create-scaffold-kit.sh   copies template/project/* into a consuming project's root
-  gitignore.append         lines appended (not overwritten) to the consumer's .gitignore
-  project/                 everything that lands in the consumer's repo root:
-    AGENTS.md              always-on session conventions (read by both Copilot and Cline)
-    notify.sh              notification stub (connect to email/Slack/etc.; no secrets are loaded by default)
-    docs/
-      functional-spec.md   what to build, for non-engineering review
-      technical-spec.md    how to build it; also where frontend stack gets recorded
-      tasks.md             sprint task table (Sprint/Task IDs + status); single source of truth for progress
-      handoff.md           snapshot for the next session (State/Decisions/Open questions/Blockers/Next)
-    .github/
-      prompts/             /functional-spec, /technical-spec, /tasks, /implement, /handoff (Copilot)
-      agents/              planner, implementer, handoff-writer (Copilot custom agents; scoped tool access per role)
-      hooks/               Copilot Stop hook wiring (hardcoded to external/ai-session-kit/scripts/check-handoff.sh)
-      instructions/        frontend.instructions.md (generated for projects with a UI; Copilot)
-    .cline/
-      skills/              functional-spec, technical-spec, tasks, handoff, planner, implementer, handoff-writer (Cline skills)
-      hooks/               PreToolUse.sh, TaskComplete.sh, TaskCancel.sh, SessionShutdown.sh — discovered by the Cline CLI
-    .clinerules/
-      frontend.md          path-scoped frontend conventions (generated for projects with a UI)
-      hooks/               same four hooks, no file extension — discovered by the Cline VS Code extension
-```
+You keep these files in your application's repository. The AI is instructed to
+work on one task at a time, write tests first, and record progress before stopping.
+Review its changes and test results; instructions do not guarantee correctness.
 
-## Install
+## Start here
 
-### Prerequisites and safe execution
+- [Install in your project](#install-in-your-project)
+- [Run your first session](#run-your-first-session)
+- [Run unattended](#run-unattended)
+- [Approve a restricted operation and resume](#approve-a-restricted-operation-and-resume)
+- [Update the kit](#update-the-kit)
+- [Troubleshooting](#troubleshooting)
+- [Container protection](supplemental/reference.md#protecting-the-container)
+- [Command policy reference](supplemental/reference.md#command-policy)
 
-To run auto-continuously (auto-continue), first install and authenticate **GitHub Copilot CLI (`copilot`) or Cline CLI (`cline`)**, and make sure it is available on `PATH` in the environment where the kit runs. Installing only the VS Code extension is not sufficient for headless continuation.
+## Install in your project
 
-> **Warning:** Allowing an agent to do anything, including running any executable automatically, can modify or delete files and expose any credentials available to it. This applies to both manual sessions with automatic approvals and unattended auto-continue sessions. Run the consuming project with ai-session-kit inside a **Dev Container**, rather than directly on your host, before granting these permissions. See [dev-container-config](https://github.com/sjcrook/dev-container-config) for a starting point. A container is not a complete security boundary: limit mounted host directories and exposed credentials, and review the agent's permissions.
+You need a Git repository for your application and either Copilot Chat or Cline
+in VS Code. Run the setup commands below **on the host, from your application's
+repository root**, before opening a container with protected directories.
 
-When using [dev-container-config](https://github.com/sjcrook/dev-container-config#generating-a-devcontainer-for-your-project), run that repo's interactive generator from the consuming project's root (assuming it is vendored at `external/dev-container-config`):
+### Adding the kit for the first time
+
+Add the kit as a Git submodule: a dependency stored at a specific revision inside
+your project.
 
 ```bash
-./external/dev-container-config/generate.sh
-```
-
-Answer the prompts to install **Node.js**. How you install Cline CLI depends on which toolchain you pick:
-
-- **pnpm toolchain** (if available): installs a pinned pnpm version at build time and blocks bare `npm install`/`ci`/`i`/`add` shell-wide, redirecting to pnpm instead. Supply this for `postCreateCommand`:
-  ```text
-  pnpm add --global cline
-  ```
-  Confirmed directly: the generator's Dockerfile already puts a global bin directory on `PATH` at build time (`ENV PATH="/opt/devcontainer/bin:${PATH}"`), so no `remoteEnv` entry is needed.
-
-- **Plain Node.js toolchain** (no pnpm): use `npm install -g cline` for `postCreateCommand` instead. Not verified here whether `PATH` needs a `remoteEnv` entry for npm's global bin directory in this case — check for your setup rather than assuming either way.
-
-The generator writes a new answers file and generates the container configuration from your responses. To change these settings later, run `generate.sh` again and answer the prompts; do not manually edit the answers file or generated container files. See that repo's README for the full setup workflow.
-
-Rebuild the container after generation, then authenticate the CLI inside it. If using Copilot instead, install and authenticate GitHub Copilot CLI inside the container rather than installing Cline.
-
-### Vendor and scaffold
-
-Vendor this repo at **exactly** `external/ai-session-kit` in the consuming project — both the Copilot Stop hook and the scaffolded Cline hook wrapper scripts hardcode that path.
-
-```bash
-git submodule add <this-repo-url> external/ai-session-kit
+git submodule add https://github.com/sjcrook/ai-session-kit.git external/ai-session-kit
 git submodule update --init --recursive
-```
-
-Then scaffold the host-owned files into the project root:
-
-```bash
 external/ai-session-kit/template/create-scaffold-kit.sh
 ```
 
-Run it from the consuming project's repo root (or pass a target directory as the first argument). It's safe to re-run any time:
+Keep the path **exactly `external/ai-session-kit`**; the installed integrations
+depend on it. Commit the submodule registration and the scaffolded project files.
+The local approval policy and runtime files are ignored by default.
 
-- Missing files are copied in.
-- Files identical to the template are skipped.
-- Files that already exist and differ are left untouched and listed at the end for you to merge manually — nothing is silently overwritten. Answer `y` at the prompt if you do want to overwrite (a timestamped `.bak` is kept).
-- Recommended `.gitignore` lines (`.env`, auto-continue's log/PID files, the auto-continue flag, and Cline's active-role marker) are appended, not overwritten.
+<details>
+<summary>What does the scaffold create or overwrite?</summary>
 
-A fresh clone of a project that vendors this kit needs:
+It installs project instructions, planning documents, Copilot prompts and agents,
+Cline skills and hooks, a notification stub, and a default command-exception file.
+
+- Missing files are created; identical files are skipped.
+- If an existing file differs, it is left for manual merging unless you approve
+  an overwrite at the prompt. Approved overwrites retain a timestamped backup.
+- An existing command-exception policy is **always preserved**, without prompting
+  to overwrite it. A missing policy is created with no exceptions enabled.
+- Recommended ignore entries are appended without replacing your `.gitignore`.
+- You can pass a target directory to the scaffold script instead of running it
+  from the project root.
+
+Rerun the scaffold when updating the kit, and review any reported differences.
+
+</details>
+
+### Opening a project that already includes the kit
+
+Do **not** add the submodule again. Download the project and its recorded
+dependencies:
 
 ```bash
-git clone --recurse-submodules <project-url>
-# or, if already cloned:
+git clone --recurse-submodules <your-application-repository-url>
+```
+
+If you already cloned without submodules, run this inside that clone:
+
+```bash
 git submodule update --init --recursive
 ```
 
-## Day-to-day usage (GitHub Copilot)
+Then run the scaffold command above to create any missing local files, including
+the default approval policy. A new clone contains committed project files, not
+ignored files such as credentials or local approvals.
 
-This part happens in **VS Code's Copilot Chat panel** (not the standalone CLI — see "Where to start a session" below), since prompts, custom agents, and the Stop hook are chat-specific features.
+## Run your first session
 
-1. Open Copilot Chat, make sure the mode/agent picker is set to **Agent**, then type `/functional-spec` and press enter — VS Code resolves this to `.github/prompts/functional-spec.prompt.md` (it shows up in the autocomplete list as you type `/`). It interviews you in the chat conversation and writes `docs/functional-spec.md`.
-2. Do the same with `/technical-spec` — it reads the functional spec, interviews you further, and writes `docs/technical-spec.md`.
-3. Run `/tasks` to turn both specs into a sprint task table in `docs/tasks.md`.
-4. To implement a task, run `/implement` to start the `implementer` agent on the next task, or select the `implementer` agent in the agent picker and ask it to work on a task. It follows the project workflow in `AGENTS.md`: read the specs, task list, and handoff; mark the task In Progress; then complete it test-first and mark it Done only after its test passes.
-5. When you stop working, run `/handoff` to summarize the session in `docs/handoff.md`. In an interactive session this is a manual step; the lifecycle hooks do not write the handoff. In auto-continue mode, each headless implementer invocation is explicitly prompted to update `docs/handoff.md` before finishing, but the file is not written by the lifecycle hook. before finishing, but that depends on the agent following its prompt.
-6. If a task becomes blocked, the implementer should mark it `⛔ Blocked · <reason>` in `docs/tasks.md` immediately, rather than waiting for `/handoff`. The hooks detect that saved task status. When you later run `/handoff`, the handoff-writer can summarize the blocker in `docs/handoff.md` and correct task statuses based on what it can verify; it does not replace the implementer's immediate status update if you may be interrupted.
+Open the application in VS Code. Choose one of the following workflows.
+The AI will ask about your requirements while preparing the specifications.
 
-You can also run any prompt via the Command Palette: **Chat: Run Prompt...** → pick it from the list, or open the `.prompt.md` file in the editor and click its play button.
+### GitHub Copilot
 
-### Using the three custom agents (Copilot)
+Use **Copilot Chat in Agent mode**, not the standalone CLI, for these prompts:
 
-These are three specialized agents you can select in Copilot Chat. Each has a different job:
-
-- **`planner`** breaks the specs into tasks or updates the task list. It does not implement features. `/tasks` selects this agent automatically.
-- **`implementer`** works on one task at a time: it writes a failing test, implements the change, runs the test, and updates the task status. `/implement` selects this agent and starts the next task; you can also select the agent directly when you want to specify a task or provide more context.
-- **`handoff-writer`** records the current state for the next session in `docs/handoff.md` and updates task statuses when needed. `/handoff` selects this agent automatically. Use it when you are ending a session, not to begin implementation.
-
-To choose an agent yourself, open the agent picker next to the chat input and select its name before typing your request. Copilot limits which tools each agent can use: only `implementer` can run shell commands. The intended file scope for each agent is described in its instructions, but is not a filesystem restriction; for example, the other agents still have access to the edit tool.
-
-### Frontend projects
-
-For a project with a UI, `/technical-spec` creates frontend conventions for the chosen stack in both tool formats: `.github/instructions/frontend.instructions.md` for Copilot, with an `applyTo` glob, and `.clinerules/frontend.md` for Cline, with a `paths` glob in YAML frontmatter. Each tool automatically applies its matching instructions when frontend files are in context. See [Cline's conditional rules documentation](https://docs.cline.bot/customization/cline-rules).
-
-## Day-to-day usage (Cline)
-
-Use the same skills in the **Cline VS Code extension** or the **Cline CLI**. Enable hooks before relying on hook behavior (see "Enabling Cline hooks" below); the skills themselves need no setup.
-
-1. In chat (or `cline "..."` on the CLI), type `run the functional-spec skill` (or similarly phrase a request mentioning it) — Cline resolves this to `.cline/skills/functional-spec/SKILL.md`. It interviews you and writes `docs/functional-spec.md`.
-2. Do the same with the `technical-spec` skill — it reads the functional spec, interviews you further, and writes `docs/technical-spec.md`.
-3. Use the `tasks` skill to turn both specs into a sprint task table in `docs/tasks.md`.
-4. To implement a task, use the `implementer` skill. The project workflow in `AGENTS.md` says to read the specs, task list, and handoff first; mark the task In Progress; then work on one task test-first and mark it Done only after its test passes.
-5. When you stop working, use the `handoff` skill to summarize the session in `docs/handoff.md`. In an interactive session this is a manual step: stopping a task/session does not automatically write the handoff. In auto-continue mode, each headless implementer invocation is explicitly prompted to update `docs/handoff.md` before finishing, but that depends on the agent following its prompt. Cline lifecycle hooks themselves only check task status and notify or optionally start auto-continue; they do not write the handoff.
-6. If a task becomes blocked, the implementer should mark it `⛔ Blocked · <reason>` in `docs/tasks.md` immediately, rather than waiting for the handoff skill. The lifecycle hooks detect that saved task status. When you later run the `handoff` skill, it can summarize the blocker and correct task statuses based on what it can verify.
-
-You can also trigger any skill directly with `/<skill-name>` in chat.
-
-## Using the Cline roles (planner/implementer/handoff-writer)
-
-Cline uses skills to provide these three roles. To limit shell access, the kit also uses a hook:
-
-- When you use the `planner`, `implementer`, or `handoff-writer` skill, it records the selected role in `.cline/.active-role`. The `tasks` and `handoff` skills select `planner` and `handoff-writer` for you.
-- A `PreToolUse` hook reads that role and blocks shell commands for `planner` and `handoff-writer`. The `implementer` role, or a session with no role selected, can run commands. This check applies in both the CLI and the VS Code extension.
-- The same hook also enforces a command deny-list (`git push`, `rm -rf`, `sudo`) for every role, including `implementer` — see "Notifications and permissions" below.
-
-To choose a role directly, ask for its skill (for example, `use the implementer skill`) and include the task you want it to do. Use `implementer` for starting or resuming implementation; use `handoff` at the end of a session.
-
-### Enabling Cline hooks
-
-Hooks must be turned on once per surface before any of the above enforcement takes effect:
-
-- **VS Code extension**: open Cline's settings and check **"Enable Hooks"**.
-- **CLI**: hooks are discovered and run automatically — no separate toggle.
-
-The **CLI** reads hooks from `.cline/hooks/<Name>.sh`; the **VS Code extension** reads them from `.clinerules/hooks/<Name>` (without a file extension). The scaffold installs both layouts because the two Cline surfaces use different hook locations.
-
-## Where to start a session: VS Code chat vs. CLI
-
-**GitHub Copilot:** start interactive sessions (spec writing, planning, implementation) from VS Code's Copilot Chat panel. Prompts, custom agents, and the `Stop` hook are VS Code Chat features. The standalone `copilot` CLI does not run the Stop hook; in this kit it is used as the headless worker for auto-continue. You can also invoke it directly for a non-interactive task, for example `copilot -p "..." --allow-all-tools -s`, but that does not trigger the chat lifecycle hook.
-
-**Cline:** either the VS Code extension or CLI can be used for interactive sessions. Enable hooks in the extension before relying on lifecycle behavior; the CLI discovers its hooks automatically (see "Enabling Cline hooks"). Auto-continue invokes the CLI headlessly; you can also run `cline "..."` directly for a one-shot non-interactive task.
-
-## Stopping a session
-
-- **Interactive chat session** (VS Code): use the stop button in the chat panel, or just close the request — this triggers Copilot's `Stop` hook, or Cline's `TaskCancel` hook if the active task was Cline's.
-- **Interactive CLI session** (`copilot` or `cline` run directly in a terminal): press `Ctrl+C`.
-- **A running auto-continue loop**: from the consuming project's root, run the vendored stop script to stop its current CLI child and the loop:
-  ```bash
-  external/ai-session-kit/scripts/stop-auto-continue.sh
-  ```
-  Then remove `.github/auto-continue-enabled` to prevent a later session's lifecycle hook from starting another loop (see "Session-end lifecycle: blocker notification and auto-continue"). Removing the flag alone does not stop a loop that is already running.
-
-## What the CLI can use
-
-The Copilot and Cline CLIs can read the shared `AGENTS.md`. The Copilot CLI also reads `.github/instructions/*.instructions.md`; Cline reads workspace rules under `.clinerules/` (including path-scoped rules) and skills under `.cline/skills/`. Copilot slash-command prompts are available in VS Code Chat, not as CLI commands. Cline's extension and CLI use different hook locations; see "Enabling Cline hooks".
-
-## Session-end lifecycle: blocker notification and auto-continue
-
-When the configured lifecycle hook runs, both backends use the same decision logic (`scripts/lib/handoff-core.sh`):
-
-- **Copilot**: the `Stop` hook runs `scripts/check-handoff.sh`.
-- **Cline**: `TaskComplete`, `TaskCancel`, and `SessionShutdown` hooks run `scripts/check-handoff-cline.sh`. The scaffold registers them for both Cline surfaces.
-
-Both entry points make the same decision:
-
-- **A `⛔ Blocked` task exists** → calls `./notify.sh "<subject>" "<message>"` (implement this with a real notification; it's a no-op stub until you do) and logs to `docs/.handoff-notifications.log`.
-- **No blocker, auto-continue is off** → just reports that.
-- **No blocker, auto-continue is on, tasks remain** → backgrounds `scripts/auto-continue.sh`, which runs the headless CLI against remaining tasks until it encounters a blocker, finishes the task list, detects no progress, or reaches its run limit. See [maintainer notes](misc/auto-continue-implementation.md) for how the loop is implemented.
-
-First complete the [CLI prerequisites and Dev Container setup](#prerequisites-and-safe-execution) above.
-
-Auto-continue is **off by default**. The `.github/auto-continue-enabled` flag applies to **both Copilot and Cline**. Create it to enable auto-continue, leave it empty to select an installed CLI automatically (Copilot is preferred), or write `copilot` or `cline` in it to select one. Remove it to disable auto-continue for future session ends:
-
-```bash
-touch .github/auto-continue-enabled        # on, auto-detect installed CLI (copilot preferred)
-echo cline > .github/auto-continue-enabled # on, pin a specific CLI
-rm .github/auto-continue-enabled           # off
-```
-
-Env var overrides (only take effect on manual/direct runs of `auto-continue.sh`, not the hook-triggered path, since hooks don't reliably propagate shell env vars):
-
-| Variable | Purpose | Default |
+| Step | Enter in chat | Result |
 |---|---|---|
-| `AUTO_CONTINUE_CLI` | Force `copilot` or `cline` | unset — falls back to the flag file's contents, then auto-detect |
-| `AUTO_CONTINUE_MAX_ITERATIONS` | Maximum number of headless CLI runs in one continuation loop (normally one task attempt per run) | `10` |
+| 1. Describe the project | `/functional-spec` | Functional specification |
+| 2. Choose the design | `/technical-spec` | Technical specification |
+| 3. Break work into tasks | `/tasks` | Sprint/task list |
+| 4. Implement the next task | `/implement` | Tests, implementation, and task status |
+| 5. Finish your session | `/handoff` | Updated context for the next session |
 
-Each loop iteration is one separate headless CLI invocation; the agent is prompted to work on one task per invocation. The default limit is 10 invocations. Lower the limit for smaller batches.
+For later sessions, use `/implement` to continue or specify a task to the
+`implementer` agent.
 
-### Cline stops without completing a task
+<details>
+<summary>Choosing an agent or running a prompt another way</summary>
 
-If the log contains `[abort] aborted by another client`, Cline interrupted the task;
-it did not complete it, even if its process returned exit code 0. Auto-continue
-detects Cline's `[abort]` output, stops immediately with exit code 1, and calls
-`notify.sh` with "Auto-continue CLI aborted" instead of retrying until the
-no-progress limit. The task status is left intact for the next session to verify.
+The agent picker offers `planner` for task planning, `implementer` for code and
+tests, and `handoff-writer` for recording progress. The prompts select the
+appropriate agent for you. Only the implementer has shell-tool access.
 
-The message alone does not identify a competing client or prove one exists.
-First look for `cline-tool-guard: denied` in `docs/.auto-continue.log`. The guard
-records the tool, role and specific matched rule (`git push`, `rm -rf`, or
-`sudo`), without logging the raw payload. If several rules match, it reports
-the first in that order. If `docs/` is absent or the log cannot be written,
-the diagnostic goes to hook stderr instead; the hook response identifies
-which destination was used.
+You can also use **Chat: Run Prompt...** in the Command Palette, or open a
+prompt file and click its play button.
 
-The guard conservatively scans the whole shell payload. Both direct temporary
-cleanup using `rm -rf` and a heredoc writing a test containing that text are
-denied. A match anywhere rejects the entire tool call, including all commands
-in a batch, before those commands run. The guard returns `cancel: true`; in the
-observed Cline workflow this can end the active task, rather than give the model
-another turn to recover. A cancellation or a lifecycle hook displaying
-"Completed" is not evidence that the implementation finished.
+</details>
 
-To prevent repeated cancellations:
+### Cline
 
-- Use the editor tool for source/test edits and shell tools for running tests.
-- Plan temporary artifacts and cleanup before running a batch. Prefer existing
-  test fixtures and their established cleanup conventions. For session-created
-  artifacts, use explicitly identified individual files and then empty
-  directories for permitted cleanup; do not translate a denied recursive
-  deletion into another spelling, interpreter, or wrapper.
-- After a denial, read the diagnostic and verify actual repository state before
-  resuming. Do not repeat the rejected operation. If no permitted workflow can
-  complete a necessary operation, explain it and mark the task Blocked.
+Hook setup depends on how you run Cline:
 
-The continuation prompt, scaffolded `AGENTS.md`, and Cline implementer skill
-describe this workflow. Disabling auto-continue does not disable the guard.
-This diagnostic improvement does not change the deny-list, automatically retry
-cancelled tasks, or change which lifecycle events can start auto-continue.
+- **VS Code extension:** turn on **Enable Hooks** in Cline's settings.
+- **Command-line interface (CLI):** no separate setting is needed; it discovers
+  the installed hooks automatically.
 
-#### Recoverable rejection: separate interface, not enabled here
+Ask Cline to run these skills in order:
 
-The current [Cline hooks documentation](https://docs.cline.bot/customization/hooks)
-points to [SDK plugins](https://docs.cline.bot/sdk/plugins). That API documents
-`beforeTool` returning `{ skip: true, reason }` to block a call and send its reason
-back to the model. This is a different interface from this kit's shell
-`PreToolUse` response (`cancel` / `errorMessage`). It does not establish that the
-same behavior is available through shell hooks in Cline 4.1.25, the version
-recorded in the investigated export, or on both CLI and extension surfaces.
-No hook-contract migration is included here. Such a change requires verifying
-version/surface support and explicit approval; returning `cancel: false` for a
-prohibited operation is not a recovery mechanism.
+| Step | Enter in chat |
+|---|---|
+| 1. Describe the project | `run the functional-spec skill` |
+| 2. Choose the design | `run the technical-spec skill` |
+| 3. Break work into tasks | `run the tasks skill` |
+| 4. Implement the next task | `run the implementer skill` |
+| 5. Finish your session | `run the handoff skill` |
 
-If there is no corresponding denial, check Cline's session diagnostics and
-installed CLI version in the environment running auto-continue. Avoid
-opening/resuming the same session from another client while the headless run is
-active; an idle chat window alone does not prove a conflict. Resolve the
-cancellation source before restarting; increasing the iteration cap will not fix
-interrupted tasks.
+You can also use `/<skill-name>`, such as `/implementer`. The same skills are
+available in the CLI; for example, `cline "run the implementer skill"`.
 
-If the log instead says "no supported CLI found", install/authenticate the CLI
-and check its `PATH` in that same environment (for example, inside the Dev
-Container, not just on the host).
+**Before ending an interactive session, request the handoff.** Stopping a session
+does not automatically write it. If work is blocked, the AI should record the
+reason in the task list immediately, rather than waiting for the handoff.
 
-Maintainers can run `bash tests/auto-continue.sh` and
-`bash tests/cline-tool-guard.sh` for offline regression checks using mock CLIs
-and guard payloads; no provider credentials or real agent runs are required.
+## Run unattended
 
-### Task-table conventions auto-continue (and every session) relies on
+Auto-continue starts separate AI sessions to work through successive tasks.
+It stops when the task list is complete, any task is marked Blocked, a CLI
+invocation fails or reports an abort, progress stalls, or the run limit is reached.
+The default limit is **10 sessions**, normally one task attempt per session.
 
-See `docs/tasks.md`'s own legend for the full wording — summarized here because it affects how `scripts/lib/handoff-core.sh` and `auto-continue.sh` interpret the file:
+> **Before enabling unattended work:** run in a suitably restricted Dev Container,
+> limit credentials and host mounts, and keep independent backups. The AI can
+> modify or delete the writable workspace, including host-mounted files.
+> Command filters are guardrails, not a sandbox. Follow the
+> [protected-mount setup](supplemental/reference.md#protecting-the-container) and
+> [verification checklist](supplemental/reference.md#verification-checklist).
 
-- **Forward test dependency**: a task whose test can only pass once a *later* task exists is left `🔄 In Progress · <date> (depends on T0XX)`, not marked Done and not marked Blocked — this is a normal sequencing note, not a blocker, so it must not contain the word "Blocked" or it will spuriously trigger notification.
-- **Blocker scope**: mark a task-specific blocker on that task's row. If a project-wide question blocks all work, mark the next task that would otherwise be worked with the same `⛔ Blocked · <reason>` status and say that it blocks all remaining work. The status format is the same in both cases. Hooks scan task rows, so a blocker written only in `docs/handoff.md` will not trigger notification.
+### Prepare the environment
 
-## Updating
+Inside the container, install and authenticate **Copilot CLI (`copilot`) or Cline
+CLI (`cline`)**. Installing only the VS Code extension is not enough. Confirm the
+selected command is available in the terminal where automation will run.
 
-Pull upstream changes into a consuming project, from the consumer's repo root:
+[dev-container-config](https://github.com/sjcrook/dev-container-config) can generate
+the container configuration. Use its generator rather than hand-editing generated
+files; see [CLI installation](supplemental/reference.md#cli-installation) for
+Cline and Copilot installation commands for pnpm and npm toolchains.
+
+If you want notifications when intervention is needed, connect the project's
+`notify.sh` to your email or messaging service. It only logs until you configure it.
+Keep notification credentials out of source control.
+
+### Start automation
+
+From the application's root **inside the container**, select a CLI and launch:
 
 ```bash
-git submodule update --remote external/ai-session-kit   # fetches + fast-forwards to the submodule's remote HEAD
-git add external/ai-session-kit                          # stage the new commit pointer
-git commit -m "chore: update ai-session-kit"           # the pointer bump is a real commit in the consumer repo
+echo cline > .github/auto-continue-enabled
+external/ai-session-kit/scripts/auto-continue.sh
 ```
 
-`--remote` is the key flag — a plain `git submodule update` alone re-checks-out whatever commit the consumer repo currently *points at*, it won't move that pointer forward on its own. Equivalently, from inside the submodule itself: `cd external/ai-session-kit && git pull && cd - && git add external/ai-session-kit && git commit`.
+Use `copilot` instead of `cline` to select Copilot. The command runs in the
+terminal and appends output to `.ai-session/auto-continue.log`.
 
-Either way, re-run `create-scaffold-kit.sh` afterward to pick up new/changed host-owned files — it won't clobber anything you've customized (see Install).
+The kit creates `.ai-session/` in your application's root for logs and the
+running worker's PID file. This directory is writable and ignored by Git;
+project specifications and progress documents remain in `docs/`.
 
-For the guard-denial guidance, merge changes to `AGENTS.md` and
-`.cline/skills/implementer/SKILL.md` if the installer reports existing differences.
-The guard and continuation prompt come from the updated vendored scripts;
-both `.cline/hooks/PreToolUse.sh` and `.clinerules/hooks/PreToolUse` must still
-point to that core for their respective Cline surfaces. Updating this kit alone
-does not update an existing consuming project's vendored revision or instructions.
+The enable file also allows configured session-end hooks to start a background
+loop after interactive work. Auto-continue is off until you create that file.
+Do not run competing workers in the same workspace.
 
-## Notifications and permissions
+<details>
+<summary>Automatic CLI selection and smaller batches</summary>
 
-- The scaffolded `notify.sh` is a logging stub; it does not send notifications or read `.env` by default. When adding a notification provider, store its API key in the consuming project's gitignored `.env` (or another secret store), not in source code. The stub includes a commented example for loading trusted, shell-compatible `.env` values; only enable it if that file is controlled by you.
-- Auto-continue does not ask for approval on each tool call: Copilot runs with `--allow-all-tools`, and Cline runs with `--auto-approve true`. Limited command restrictions are safeguards, not a security boundary. Auto-continue can modify or delete project files. Use an appropriately isolated environment, such as a Dev Container, and limit its mounted files and credentials before enabling it.
-- Agent file-scope limits are instructions, not a filesystem sandbox. Shell restrictions are enforced by Copilot's agent tool configuration and Cline's `PreToolUse` hook; neither substitutes for isolating the environment.
+An empty enable file selects an installed CLI automatically, preferring Copilot:
+
+```bash
+touch .github/auto-continue-enabled
+```
+
+For a direct launch limited to three sessions:
+
+```bash
+AUTO_CONTINUE_MAX_ITERATIONS=3 external/ai-session-kit/scripts/auto-continue.sh
+```
+
+See [continuation settings](supplemental/reference.md#continuation-settings) for CLI
+selection overrides and session-end behavior.
+
+</details>
+
+### Stop automation
+
+First remove the enable file to prevent a session-end hook from launching another
+loop, then stop the recorded loop and its current CLI child:
+
+```bash
+rm -f .github/auto-continue-enabled
+external/ai-session-kit/scripts/stop-auto-continue.sh
+```
+
+Removing the enable file alone does **not** stop an existing loop. For an
+interactive session, use the chat stop button or press `Ctrl+C` in the CLI.
+Once the active request has stopped, ask the AI to run the handoff workflow as a
+new request, then close the session. If stopping the CLI exits it, reopen the
+conversation if supported. After an interruption, especially if you must start
+a new session without the previous conversation, use the saved recovery workflow:
+
+- **Copilot Chat:** enter `/recover-handoff`; it selects the handoff writer.
+- **Cline:** enter `/recover-handoff` or `run the recover-handoff skill`.
+
+It reviews saved documents, available changes, and recorded results, then writes
+confirmed progress, uncertainties, and next steps into the handoff. It does not
+run tests or resume implementation, and records verification it cannot perform.
+Keep auto-continue disabled and workers stopped while recovery runs. Use ordinary
+`/handoff` for a normal session ending where the conversation is still available.
+
+## Approve a restricted operation and resume
+
+By default, the kit restricts `git push`, `rm -rf`, and `sudo` on its supported
+execution paths. If a necessary operation is rejected, **you can approve the
+permission and let the AI continue**; you do not have to implement the task yourself.
+
+**Approvals must be controlled from the host.** Mount `command-exceptions/`
+read-only, along with the tooling and hook directories that enforce the policy,
+before relying on approvals. A policy the agent
+can edit is not trusted approval. See the [mount guide](supplemental/reference.md#mount-example).
+
+Once those protections are in place, follow these steps when the AI stops because
+a necessary operation was denied:
+
+1. [Stop automation](#stop-automation).
+2. **For auto-continue with either Copilot or Cline**, read
+   `.ai-session/auto-continue.log` for the rejection or error. **For an interactive
+   session**, check the tool's conversation panel or CLI terminal output. Cline
+   guard denials are also recorded in the log when logging is available.
+3. On the host, edit `command-exceptions/command-exceptions.conf`. For example:
+
+   ```text
+   allow-recursive-delete
+   ```
+
+4. In the container, run `/prepare-resume <task_id>` (e.g.,
+   `/prepare-resume T032`). In Cline, you can also ask it to
+   `run the prepare-resume skill for T032`. Confirm that workers are stopped
+   when asked. The workflow checks the visible policy against the rejection,
+   verifies available saved state, and prepares the affected task and handoff.
+   It asks for missing evidence rather than guessing and preserves unrelated
+   blockers. It does not run commands or resume implementation.
+5. Start automation only after it reports `Ready to resume <task_id>` and no
+   other Blocked task rows remain. The AI reruns necessary validation and marks the task
+   Done only after its acceptance tests pass.
+6. When the permission is no longer needed, stop the worker and remove the
+   exception from the host.
+
+> **Approving recursive deletion allows `rm -rf` to delete files and directories
+> anywhere the container user has write access, including your host-mounted
+> project.** The approval is not limited to temporary files.
+
+<details>
+<summary>Other exceptions and differences between Cline and Copilot</summary>
+
+| Entry | Restriction relaxed |
+|---|---|
+| `allow-recursive-delete` | `rm -rf` |
+| `allow-git-push` | `git push` |
+| `allow-sudo` | `sudo` |
+
+Use one exact name per line. Approving deletion does not approve pushing or
+sudo, and does not override role restrictions.
+
+Cline reads policy for each shell call. Headless Copilot launched by the kit
+reads it at each invocation; restart a running invocation after a permission
+change. Independently launched Copilot sessions have their own permission controls.
+
+See [policy syntax](supplemental/reference.md#syntax-and-errors),
+[matching limits](supplemental/reference.md#batches-and-matching-limits), and
+[backend differences](supplemental/reference.md#backend-differences) for details.
+
+</details>
+
+## Update the kit
+
+Stop workers. From the application's root **on the host**, fetch a newer kit
+revision and refresh the scaffold:
+
+```bash
+git submodule update --remote external/ai-session-kit
+external/ai-session-kit/template/create-scaffold-kit.sh
+```
+
+Review the changes and merge any existing scaffold files reported as different,
+especially project instructions and the Cline implementer skill. Existing
+approvals are preserved. Commit the updated submodule reference and intended
+project changes.
+
+For example, if you updated the kit and merged changes to the project
+instructions and Cline implementer skill, run these commands from your
+application's root:
+
+```bash
+git add external/ai-session-kit AGENTS.md .cline/skills/implementer/SKILL.md
+git diff --cached
+git commit -m "chore: update ai-session-kit and project instructions"
+```
+
+Adjust the file list to include only the scaffold changes you reviewed and want
+to keep. `git diff --cached` shows everything currently staged; review it before
+committing, including anything staged earlier. Do not include local approvals
+or credentials.
+
+A plain `git submodule update --init --recursive` restores the revision already
+recorded by the application; `--remote` selects a newer revision from the
+submodule's configured remote branch.
+
+Protected directories can be updated from the host. Recreate the container if
+mount configuration or mount-source directories change. See
+[Git and protected files](supplemental/reference.md#git-and-protected-files) for details.
+
+## Troubleshooting
+
+| Symptom | First action |
+|---|---|
+| Cline stops before completing a task | Look for `cline-tool-guard: denied` in `.ai-session/auto-continue.log`; review permission before restarting. |
+| `[abort] aborted by another client` | Treat it as interruption, not success. The message alone does not prove a competing client exists. Check guard diagnostics first. |
+| No CLI found | Install/authenticate the CLI and check its availability inside the container, not just on the host. |
+| Automation will not proceed | Check all task rows for Blocked status. A blocker only in the handoff does not trigger task-based notification. |
+| Policy error | Correct the host-side policy using the documented names; invalid policy prevents shell execution. |
+| Approval edit is not visible | Check contents inside the container; recreate it if host file replacement or file sharing left a stale mount. |
+
+A rejected Cline command batch does not run at all, although earlier calls may
+have run. Do not infer completion from an exit code of zero or a hook displaying
+“Completed.” Inspect saved state and test results.
+
+## Further reference
+
+- [Container protection and mount setup](supplemental/reference.md#protecting-the-container)
+- [Command policy](supplemental/reference.md#command-policy)
+- [Cline and Copilot policy differences](supplemental/reference.md#backend-differences)
+- [Continuation settings](supplemental/reference.md#continuation-settings)
+- [Maintainer reference and offline tests](supplemental/reference.md#maintainer-reference)
