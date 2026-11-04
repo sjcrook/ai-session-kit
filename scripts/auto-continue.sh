@@ -169,7 +169,14 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
     "$SCRIPT_DIR/check-handoff.sh" >>"$LOG_FILE" 2>&1
     exit 0
   fi
-  if ! grep -E '^\| *S[0-9]+ *\| *T[0-9]+ *\|' "$TASKS_FILE" | grep -q -v 'Done'; then
+  # Single-process check (no pipe): under `set -o pipefail`, a two-stage
+  # `grep | grep -q` here would be racy — `grep -q` exits as soon as it finds
+  # a match, which can SIGPIPE the upstream grep before it finishes writing,
+  # and pipefail then reports that SIGPIPE as the pipeline's failure status
+  # even though a real unfinished task was found. That flips this check's
+  # sense and makes the loop stop early, claiming "no unfinished tasks
+  # remain" while rows further down the file are still Todo.
+  if ! awk '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ && !/Done/ { found=1 } END { exit !found }' "$TASKS_FILE"; then
     log "auto-continue: stopping — no unfinished tasks remain"
     exit 0
   fi
