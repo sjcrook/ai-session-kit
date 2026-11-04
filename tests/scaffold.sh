@@ -40,6 +40,20 @@ grep -Fx 'agent: planner' "$project/.github/prompts/tasks.prompt.md" >/dev/null
 grep -Fx 'tools: [read, search, edit]' "$project/.github/agents/planner.agent.md" >/dev/null
 echo 'PASS: planning workflows install full-backlog and protected-placeholder instructions'
 
+for constraint in 'General conversation is the default.' \
+  'Do not automatically read project documents, select tasks, change task statuses, or write a handoff for a general question.' \
+  'A previous workflow command does not make later unrelated questions workflow requests.' \
+  'Auto-continue requests explicitly activate the implementation workflow.' \
+  '## Always-On Safety and Tool Use' \
+  '## Implementation Session Start' \
+  '## Ending a Workflow Session'; do
+  grep -F "$constraint" "$project/AGENTS.md" >/dev/null
+done
+! grep -F 'before doing anything else' "$project/AGENTS.md" >/dev/null
+grep -F 'For specification, planning, handoff, recovery, and resume-preparation requests, read only the context required by the invoked prompt or skill.' "$project/AGENTS.md" >/dev/null
+grep -F 'Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md.' "$KIT_ROOT/scripts/auto-continue.sh" >/dev/null
+echo 'PASS: general conversation defaults to no workflow bookkeeping while preserving safety and auto-continue context'
+
 recovery_prompt=".github/prompts/recover-handoff.prompt.md"
 recovery_skill=".cline/skills/recover-handoff/SKILL.md"
 for path in "$recovery_prompt" "$recovery_skill"; do

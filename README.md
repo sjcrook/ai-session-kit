@@ -21,8 +21,8 @@ The kit adds instructions and four documents to your project:
 | `docs/tasks.md` | What needs doing, and what is complete or blocked? |
 | `docs/handoff.md` | Where should the next session start? |
 
-You keep these files in your application's repository. The AI is instructed to
-work on one task at a time, write tests first, and record progress before stopping.
+You keep these files in your application's repository. During task implementation,
+the AI is instructed to work on one task at a time, write tests first, and record progress before stopping.
 Review its changes and test results; instructions do not guarantee correctness.
 
 ## Start here
@@ -100,6 +100,16 @@ ignored files such as credentials or local approvals.
 Open the application in VS Code. Choose one of the following workflows.
 The AI will ask about your requirements while preparing the specifications.
 
+General questions do not activate the structured workflow. The agent should
+answer normally, reading files only when relevant to your question, without
+automatically loading the four project documents or updating tasks and handoffs.
+Invoke a kit command/skill or explicitly ask for equivalent workflow work to
+activate it; asking about a command is not the same as running it. An unrelated
+question after a workflow command returns to ordinary conversation. Command
+restrictions, approval requirements, and active role tool restrictions still
+apply. Auto-continue explicitly requests implementation and retains its required
+document reads.
+
 ### GitHub Copilot
 
 Use **Copilot Chat in Agent mode**, not the standalone CLI, for these prompts:
@@ -157,9 +167,12 @@ Ask Cline to run these skills in order:
 You can also use `/<skill-name>`, such as `/implementer`. The same skills are
 available in the CLI; for example, `cline "run the implementer skill"`.
 
-**Before ending an interactive session, request the handoff.** Stopping a session
+**Before ending an implementation session, request the handoff.** Stopping a session
 does not automatically write it. If work is blocked, the AI should record the
 reason in the task list immediately, rather than waiting for the handoff.
+General conversation does not require a handoff. Installed lifecycle hooks still
+check task state and may notify or launch auto-continue when enabled; these
+instructions do not disable those hooks.
 
 ## Run unattended
 
