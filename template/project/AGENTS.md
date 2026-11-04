@@ -1,5 +1,9 @@
 # Project Guidelines
 
+## Workflow Scope
+- Specification and planning commands (`/functional-spec`, `/technical-spec`, `/tasks`, and the equivalent skills or planner role) prepare or revise project documents, not implementation. They may cover the full requested scope regardless of the handoff's "Next" list; the one-task/TDD execution rules and 1-3-task session limits below apply only to implementation sessions.
+- Planning must not implement code or mark tasks Done. Follow the active role's file-editing restrictions; request a separate handoff update if planning makes the current handoff stale.
+
 ## Session Start
 - Read `docs/functional-spec.md`, `docs/technical-spec.md`, `docs/tasks.md`, and `docs/handoff.md` before doing anything else (a `SessionStart`-equivalent check also happens via the Stop hook from the previous session).
 - Work only the task(s) listed under "Next" in `docs/handoff.md` — don't scope-creep into later sprints. If `docs/handoff.md` is still the unedited template (e.g. `State` still reads `{What exists right now...}`), this is the first session: start from the first `🔲 Todo` row in `docs/tasks.md` instead.

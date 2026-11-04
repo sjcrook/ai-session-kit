@@ -115,6 +115,15 @@ Use **Copilot Chat in Agent mode**, not the standalone CLI, for these prompts:
 For later sessions, use `/implement` to continue or specify a task to the
 `implementer` agent.
 
+Planning covers the full requested scope; the one-task implementation limit and
+handoff's "Next" list do not restrict `/tasks`. The three blank task-template
+rows are placeholders: `/tasks` fills them in place, retains their IDs, and adds
+as many tasks and sprints as the specifications require. It may clear a
+placeholder's blocker solely for missing description/acceptance criteria once
+those details are supplied, but preserves genuine Done, In Progress, and Blocked
+work. The equivalent Cline skills follow the same rules. Review the backlog
+before implementation and request a handoff update if planning made it stale.
+
 <details>
 <summary>Choosing an agent or running a prompt another way</summary>
 

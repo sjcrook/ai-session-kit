@@ -22,6 +22,24 @@ grep -Fx '/.ai-session/' "$project/.gitignore" >/dev/null
 )
 echo 'PASS: fresh scaffold creates a policy with no grants and ignores operator state'
 
+for path in AGENTS.md docs/tasks.md .github/prompts/tasks.prompt.md \
+  .github/agents/planner.agent.md .cline/skills/tasks/SKILL.md \
+  .cline/skills/planner/SKILL.md; do
+  cmp "$project/$path" "$KIT_ROOT/template/project/$path"
+done
+grep -F 'session limits below apply only to implementation sessions.' "$project/AGENTS.md" >/dev/null
+grep -F 'Never treat Done or In Progress rows, or rows with other blockers, as placeholders.' "$project/docs/tasks.md" >/dev/null
+for path in .github/prompts/tasks.prompt.md .github/agents/planner.agent.md \
+  .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do
+  for constraint in 'three template rows are not a task limit.' \
+    '🔲 Todo' 'as-is' 'every requirement in both specifications'; do
+    grep -F "$constraint" "$project/$path" >/dev/null
+  done
+done
+grep -Fx 'agent: planner' "$project/.github/prompts/tasks.prompt.md" >/dev/null
+grep -Fx 'tools: [read, search, edit]' "$project/.github/agents/planner.agent.md" >/dev/null
+echo 'PASS: planning workflows install full-backlog and protected-placeholder instructions'
+
 recovery_prompt=".github/prompts/recover-handoff.prompt.md"
 recovery_skill=".cline/skills/recover-handoff/SKILL.md"
 for path in "$recovery_prompt" "$recovery_skill"; do

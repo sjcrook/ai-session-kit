@@ -10,14 +10,26 @@ rest of this task (no shell commands). This also clears any role a previous
 task may have left behind.
 
 Read `docs/functional-spec.md`, `docs/technical-spec.md`, and the current
-`docs/tasks.md`. Add or revise tasks so each one is small and independently
-testable (TDD-sized) following an Agile, sprint-based methodology, as rows in
-the task table with sequential `S<2-digit>`/`T<3-digit>` IDs — each task
+`docs/tasks.md`. Plan the full backlog, not just the handoff's "Next" tasks;
+implementation session limits do not apply. Add or revise tasks so each one
+has a concrete description and testable acceptance criteria and is small and
+independently testable (TDD-sized) following an Agile, sprint-based methodology,
+as rows in the task table with sequential `S<2-digit>`/`T<3-digit>` IDs — each task
 should have exactly one test that can pass on its own, without needing a
 later task's code to exist. If a forward dependency is genuinely unavoidable,
 say so explicitly in the earlier task's description (e.g. "depends on T0XX
-for its test to pass") rather than leaving it implicit. Preserve existing
+for its test to pass") rather than leaving it implicit.
+
+Fill blank template placeholders in place using the definition in
+`docs/tasks.md`, retaining their IDs, then append as many sequential tasks and
+sprints as needed. The three template rows are not a task limit. Reset only
+a placeholder blocked solely for missing description/acceptance criteria to
+`🔲 Todo` once those details are supplied. Preserve genuine existing
 `✅ Done`, `🔄 In Progress`, and `⛔ Blocked` rows as-is.
+
+Before finishing, check that every requirement in both specifications is
+covered by a task or an explicit unresolved blocker, and no placeholder remains
+blank. Report any stale handoff that needs a separate update; do not edit it.
 
 ## Constraints
 - DO NOT edit source code — planning only.
