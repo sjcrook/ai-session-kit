@@ -11,7 +11,7 @@
 
 ## Implementation Session Start
 - When starting or resuming task implementation, read `docs/functional-spec.md`, `docs/technical-spec.md`, `docs/tasks.md`, and `docs/handoff.md` before selecting or changing a task.
-- Work only the task(s) listed under "Next" in `docs/handoff.md` — don't scope-creep into later sprints. If `docs/handoff.md` is still the unedited template (e.g. `State` still reads `{What exists right now...}`), this is the first session: start from the first `🔲 Todo` row in `docs/tasks.md` instead.
+- Work the task(s) listed under "Next" in `docs/handoff.md`, but treat `docs/tasks.md`'s actual statuses as authoritative: repeated `/implement` runs in one conversation don't write a handoff between them, so the "Next" list can be stale — if a listed task is already `✅ Done`, or an earlier task is still `🔲 Todo`/`🔄 In Progress`, pick the first eligible row in `docs/tasks.md` instead of the stale entry. Don't scope-creep into later sprints beyond that. If `docs/handoff.md` is still the unedited template (e.g. `State` still reads `{What exists right now...}`), no handoff has been recorded yet — this does not necessarily mean no session has run: start from the first `🔲 Todo` or `🔄 In Progress` row in `docs/tasks.md` instead.
 - If the task you'd pick up is already `🔄 In Progress`, don't assume the previous session finished or even safely started it — check `git status`/`git diff` and run the test suite first to find the real state before resuming or restarting it.
 
 ## Implementation Methodology

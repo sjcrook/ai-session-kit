@@ -75,6 +75,16 @@ grep -F 'For specification, planning, handoff, recovery, and resume-preparation 
 grep -F 'Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md.' "$KIT_ROOT/scripts/auto-continue.sh" >/dev/null
 echo 'PASS: general conversation defaults to no workflow bookkeeping while preserving safety and auto-continue context'
 
+cmp "$project/docs/handoff.md" "$KIT_ROOT/template/project/docs/handoff.md"
+grep -F 'no handoff has been recorded yet' "$project/docs/handoff.md" >/dev/null
+! grep -F 'no session has run yet' "$project/docs/handoff.md" >/dev/null
+grep -F 'treat `docs/tasks.md`'"'"'s actual statuses as authoritative' "$project/AGENTS.md" >/dev/null
+grep -F 'no handoff has been recorded yet' "$project/AGENTS.md" >/dev/null
+! grep -F 'this is the first session' "$project/AGENTS.md" >/dev/null
+grep -F "doesn't write a handoff" "$KIT_ROOT/README.md" >/dev/null
+grep -F 'treat `docs/tasks.md` as authoritative over a now-stale "Next" list' "$KIT_ROOT/README.md" >/dev/null
+echo 'PASS: handoff docs distinguish "no handoff recorded" from "no session ran" and favor tasks.md over a stale Next list'
+
 recovery_prompt=".github/prompts/recover-handoff.prompt.md"
 recovery_skill=".cline/skills/recover-handoff/SKILL.md"
 for path in "$recovery_prompt" "$recovery_skill"; do

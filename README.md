@@ -140,6 +140,15 @@ Use **Copilot Chat in Agent mode**, not the standalone CLI, for these prompts:
 For later sessions, use `/implement` to continue or specify a task to the
 `implementer` agent.
 
+`/implement` doesn't write a handoff — run `/handoff` before leaving the
+conversation or starting a new one, not necessarily between every `/implement`
+in the same conversation. A `docs/handoff.md` still showing the blank template
+means no handoff has been recorded, not that no work has happened: check
+`docs/tasks.md`'s actual statuses, since several completed or in-progress tasks
+can exist with no handoff reflecting them yet. If you do populate a handoff's
+"Next" list and later run more `/implement` sessions without updating it again,
+treat `docs/tasks.md` as authoritative over a now-stale "Next" list.
+
 Planning covers the full requested scope; the one-task implementation limit and
 handoff's "Next" list do not restrict `/tasks`. The three blank task-template
 rows are placeholders: `/tasks` fills them in place, retains their IDs, and adds
@@ -183,8 +192,13 @@ You can also use `/<skill-name>`, such as `/implementer`. The same skills are
 available in the CLI; for example, `cline "run the implementer skill"`.
 
 **Before ending an implementation session, request the handoff.** Stopping a session
-does not automatically write it. If work is blocked, the AI should record the
-reason in the task list immediately, rather than waiting for the handoff.
+does not automatically write it, and running the implementer skill again in the
+same conversation doesn't either — only request it before leaving the
+conversation or starting a new one. If work is blocked, the AI should record the
+reason in the task list immediately, rather than waiting for the handoff. A
+`docs/handoff.md` still showing the blank template means no handoff has been
+recorded, not that no work has happened — check `docs/tasks.md`'s actual
+statuses, and treat them as authoritative over a stale "Next" list.
 General conversation does not require a handoff. Installed lifecycle hooks still
 check task state and may notify or launch auto-continue when enabled; these
 instructions do not disable those hooks.

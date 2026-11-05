@@ -1,7 +1,7 @@
 # Handoff
 
 _Overwritten each session — a snapshot, not a log. Permanent decisions belong in commit messages / PR descriptions, not here._
-_If this file is still exactly this template, no session has run yet — start from the first 🔲 Todo row in `docs/tasks.md` instead of looking for a "Next" list here._
+_If this file is still exactly this template, no handoff has been recorded yet — this does not necessarily mean no session has run (`/implement` doesn't write one). Check `docs/tasks.md`'s actual statuses and start from its first 🔲 Todo or 🔄 In Progress row instead of looking for a "Next" list here._
 
 ## State
 {What exists right now, in 2-3 sentences}
