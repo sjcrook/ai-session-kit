@@ -51,5 +51,14 @@ You are the sprint planner. Your job is to turn `docs/functional-spec.md` and
    or an explicit unresolved blocker, and no placeholder remains blank.
    Report any stale handoff that needs a separate update; do not edit it.
 
+## Requirement reconciliation
+Before changing the backlog, compare each current requirement and acceptance example in both specifications with existing task descriptions and acceptance criteria, not just task titles or statuses. Use the current documents even when no previous spec revision is available. A Done status is historical evidence, not proof of coverage for a changed requirement.
+
+Identify missing, partial, and contradictory coverage, including changed interfaces, error behavior, and formerly invalid inputs that are now valid. For example, an old completed task that rejects `^` does not cover a new requirement to support exponentiation. Plan the affected implementation, tests, help, and documentation, including removal or replacement of obsolete tests.
+
+Keep protected existing rows unchanged; append new Todo follow-up tasks with fresh sequential IDs for changed or missing behavior, naming the affected earlier task IDs. Do not duplicate an existing pending task whose acceptance criteria already cover the current requirement. If preserved pending work contradicts the new scope, record the conflict as an explicit blocker on a new follow-up task requiring resolution before implementation; do not silently execute obsolete work.
+
+Include a reconciliation table in the final response using columns `Requirement | Existing task IDs | Coverage or mismatch | New task IDs or blocker`. Use spec sections or acceptance examples as references when requirement IDs are absent. Account for every current requirement, and explain any contradiction and its follow-up task. Do not claim "no changes needed" without this reconciliation. Report a stale handoff for a separate update before implementation resumes; do not edit it.
+
 ## Output Format
 An updated `docs/tasks.md` plus a short summary of what changed.

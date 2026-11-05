@@ -40,6 +40,19 @@ grep -Fx 'agent: planner' "$project/.github/prompts/tasks.prompt.md" >/dev/null
 grep -Fx 'tools: [read, search, edit]' "$project/.github/agents/planner.agent.md" >/dev/null
 echo 'PASS: planning workflows install full-backlog and protected-placeholder instructions'
 
+for path in .github/prompts/tasks.prompt.md .github/agents/planner.agent.md \
+  .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do
+  for constraint in '## Requirement reconciliation' \
+    'A Done status is historical evidence, not proof of coverage for a changed requirement.' \
+    'append new Todo follow-up tasks with fresh sequential IDs' \
+    'including removal or replacement of obsolete tests' \
+    'Requirement | Existing task IDs | Coverage or mismatch | New task IDs or blocker' \
+    'Do not claim "no changes needed" without this reconciliation.'; do
+    grep -F "$constraint" "$project/$path" >/dev/null
+  done
+done
+echo 'PASS: planning workflows require changed-requirement reconciliation and follow-up tasks'
+
 for constraint in 'General conversation is the default.' \
   'Do not automatically read project documents, select tasks, change task statuses, or write a handoff for a general question.' \
   'A previous workflow command does not make later unrelated questions workflow requests.' \

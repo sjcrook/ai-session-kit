@@ -29,6 +29,7 @@ Review its changes and test results; instructions do not guarantee correctness.
 
 - [Install in your project](#install-in-your-project)
 - [Run your first session](#run-your-first-session)
+- [Add or change functionality](#add-or-change-functionality)
 - [Run unattended](#run-unattended)
 - [Approve a restricted operation and resume](#approve-a-restricted-operation-and-resume)
 - [Update the kit](#update-the-kit)
@@ -173,6 +174,35 @@ reason in the task list immediately, rather than waiting for the handoff.
 General conversation does not require a handoff. Installed lifecycle hooks still
 check task state and may notify or launch auto-continue when enabled; these
 instructions do not disable those hooks.
+
+## Add or change functionality
+
+Treat the specifications as living documents and completed tasks as historical
+records. After an initial implementation:
+
+1. Use `/functional-spec` to describe the approved new or changed behavior and
+  acceptance examples, preserving requirements that still apply.
+2. Use `/technical-spec` to update the affected design, interfaces, data,
+  compatibility, and verification requirements.
+3. Run `/tasks` to reconcile the current specifications against existing task
+  descriptions and acceptance criteria. Changed behavior needs new follow-up
+  tasks with fresh IDs, not reopened or rewritten completed tasks. Include
+  updates to tests that assert behavior the new requirements replace.
+4. Review the planner's requirement-coverage table and new tasks, then request
+  `/handoff` to refresh its "Next" list before `/implement` or auto-continue.
+
+Use the equivalent skills in Cline. A completed task is not proof that its
+acceptance criteria cover a revised requirement: a task that rejected an operator
+does not cover a later requirement to support it. The planner must report these
+mismatches, even without an older spec revision, and must not report "no changes
+needed" without a requirement reconciliation. Repeating `/tasks` should not
+duplicate follow-up tasks that already cover the current scope.
+
+These are agent instructions, not a deterministic requirements checker. Review
+the reconciliation before implementation. Existing installations must receive
+the updated planning prompts, agents, and skills via the [kit update
+procedure](#update-the-kit); updating this repository alone does not change
+previously scaffolded files.
 
 ## Run unattended
 
