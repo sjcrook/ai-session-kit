@@ -22,6 +22,14 @@ grep -Fx '/.ai-session/' "$project/.gitignore" >/dev/null
 )
 echo 'PASS: fresh scaffold creates a policy with no grants and ignores operator state'
 
+manifest="$project/.ai-session-kit-manifest"
+if [[ -f "$manifest" ]]; then
+  kit_head="$(git -C "$KIT_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  [[ -z "$kit_head" || "$(cat "$manifest")" == "$kit_head" ]]
+  ! grep -qF '.ai-session-kit-manifest' "$project/.gitignore"
+fi
+echo 'PASS: a fresh scaffold records the current kit commit without gitignoring it'
+
 for path in AGENTS.md docs/tasks.md .github/prompts/tasks.prompt.md \
   .github/agents/planner.agent.md .cline/skills/tasks/SKILL.md \
   .cline/skills/planner/SKILL.md; do

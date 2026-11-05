@@ -65,15 +65,29 @@ It installs project instructions, planning documents, Copilot prompts and agents
 Cline skills and hooks, a notification stub, and a default command-exception file.
 
 - Missing files are created; identical files are skipped.
-- If an existing file differs, it is left for manual merging unless you approve
-  an overwrite at the prompt. Approved overwrites retain a timestamped backup.
+- If an existing file differs from the current template, the scaffold checks
+  `.ai-session-kit-manifest` — the kit commit this project was last scaffolded
+  from — to tell an untouched file from a locally edited one:
+  - Unchanged since that commit: the update is applied directly (no prompt).
+  - Locally edited: a three-way merge combines the upstream and local changes
+    when they don't overlap, keeping a timestamped backup of the pre-merge
+    file for review. Overlapping edits are left for manual merging, untouched.
+  - No recorded manifest, or the kit isn't a git checkout with that commit
+    available: the file is left for manual merging unless you approve an
+    overwrite at the prompt (the original behavior). Approved overwrites
+    retain a timestamped backup.
+- **Commit `.ai-session-kit-manifest`** alongside the scaffolded project files —
+  without it, every update falls back to manual merging for anything you've touched.
 - An existing command-exception policy is **always preserved**, without prompting
-  to overwrite it. A missing policy is created with no exceptions enabled.
+  to overwrite it, merging, or manifest tracking. A missing policy is created
+  with no exceptions enabled.
 - Recommended ignore entries are appended without replacing your `.gitignore`.
 - You can pass a target directory to the scaffold script instead of running it
   from the project root.
 
-Rerun the scaffold when updating the kit, and review any reported differences.
+Rerun the scaffold when updating the kit, and review any auto-merges or
+reported differences — these are textual merges, not a guarantee that the
+combined file is logically correct.
 
 </details>
 
@@ -374,16 +388,19 @@ external/ai-session-kit/template/create-scaffold-kit.sh
 ```
 
 Review the changes and merge any existing scaffold files reported as different,
-especially project instructions and the Cline implementer skill. Existing
-approvals are preserved. Commit the updated submodule reference and intended
-project changes.
+especially project instructions and the Cline implementer skill. Files that were
+auto-merged (an untouched file fast-forwarded, or a non-conflicting local edit
+was combined with an upstream change) still need review — check the diff and
+remove the `.bak` once confirmed. Existing approvals are preserved. Commit the
+updated submodule reference, the refreshed `.ai-session-kit-manifest`, and
+intended project changes.
 
 For example, if you updated the kit and merged changes to the project
 instructions and Cline implementer skill, run these commands from your
 application's root:
 
 ```bash
-git add external/ai-session-kit AGENTS.md .cline/skills/implementer/SKILL.md
+git add external/ai-session-kit .ai-session-kit-manifest AGENTS.md .cline/skills/implementer/SKILL.md
 git diff --cached
 git commit -m "chore: update ai-session-kit and project instructions"
 ```
