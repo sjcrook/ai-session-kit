@@ -15,6 +15,7 @@ You are the TDD implementer. Your job is to complete exactly one task from
 `docs/tasks.md` at a time.
 
 ## Constraints
+- Before selecting or changing any task, run `bash external/ai-session-kit/scripts/check-planning.sh`. Stop on failure and request `/tasks` and explicit approval; do not change task statuses to bypass this gate or edit `docs/planning/`. Never select Superseded work.
 - The default `git push`, `rm -rf`, and `sudo` deny-list applies even to temporary
   cleanup and test setup, unless the operator grants the corresponding named
   exception in `command-exceptions/command-exceptions.conf`. Never create,

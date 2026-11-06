@@ -11,6 +11,7 @@
 #     located regardless of which hook script sourced this file).
 handoff_core_run() {
   local script_dir="$1"
+  source "$script_dir/lib/planning-core.sh"
   local tasks_file="docs/tasks.md"
   local handoff_file="docs/handoff.md"
   local notify_script="./notify.sh"
@@ -22,7 +23,7 @@ handoff_core_run() {
     # Task rows start "| S<sprint> | T<task> |" — anchored on that prefix so a bare
     # substring match doesn't also hit tasks.md's own legend line, which contains
     # the word "Blocked" too.
-    blocked_lines=$(grep -nE '^\| *S[0-9]+ *\| *T[0-9]+ *\|.*Blocked' "$tasks_file" || true)
+    blocked_lines=$(awk -F '|' '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ { status=$5; sub(/^[^[:alnum:]]*/, "", status); if (status ~ /^Blocked([[:space:]]|$)/) print NR ":" $0 }' "$tasks_file")
   fi
 
   if [[ -n "$blocked_lines" ]]; then
@@ -55,8 +56,15 @@ See $handoff_file for full context."
     return
   fi
 
-  local remaining
-  remaining=$(grep -E '^\| *S[0-9]+ *\| *T[0-9]+ *\|' "$tasks_file" 2>/dev/null | grep -vc 'Done' || true)
+  if [[ -f "$tasks_file" ]] && ! planning_check; then
+    HANDOFF_MESSAGE="$PLANNING_ERROR Auto-continue was not started."
+    return
+  fi
+
+  local remaining=0
+  if [[ -f "$tasks_file" ]]; then
+    remaining=$(awk -F '|' '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ { sub(/^[^[:alnum:]]*/, "", $5); if ($5 !~ /^(Done|Superseded)([[:space:]]|$)/) count++ } END { print count+0 }' "$tasks_file")
+  fi
 
   if [[ ! -f "$auto_continue_flag" ]]; then
     HANDOFF_MESSAGE="No blockers detected. Auto-continue is off (touch $auto_continue_flag to enable it — auto-detects the Copilot/Cline CLI, or write 'copilot'/'cline' into the file to pin one)."

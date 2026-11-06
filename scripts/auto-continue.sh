@@ -10,6 +10,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/command-policy.sh"
+source "$SCRIPT_DIR/lib/planning-core.sh"
 TASKS_FILE="docs/tasks.md"
 LOG_FILE=".ai-session/auto-continue.log"
 PID_FILE=".ai-session/auto-continue.pid"
@@ -83,6 +84,7 @@ fi
 
 PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Use file-editing tools to create or edit source and tests, not shell heredocs: the command guard scans the entire shell payload, including file content. Do not bypass a denied command. Write a failing test first, then the minimal implementation, then set its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
 PROMPT+=" The git push, rm -rf, and sudo deny-list applies to direct commands too, including temporary cleanup and test setup, unless the operator grants the corresponding named exception in command-exceptions/command-exceptions.conf. Never create, edit, or redirect that operator policy or its enforcement files. Using an operator-granted exception is permitted. An unapproved match anywhere in a batch rejects the entire tool call and may end the Cline task. Prefer established test fixtures; plan cleanup of session-created artifacts using explicitly identified individual files and then empty directories. Never retry or disguise a denied operation with alternate spellings, interpreters, or wrappers. When resuming after a denial, check .ai-session/auto-continue.log (or hook stderr if logging was unavailable) and verify real state; do not assume any rejected batch ran. After the operator changes permission, reassess only the affected blocker and rerun necessary validation. Cancellation is not completion; report a necessary operation with no permitted workflow as a blocker."
+PROMPT+=" Before selecting or changing any task, run bash external/ai-session-kit/scripts/check-planning.sh. If approval is missing or stale, stop and request /tasks and explicit approval; never approve or edit docs/planning/ yourself. Never select Superseded work."
 
 # Runs one iteration; preserves the CLI exit code and detects Cline aborts,
 # which can be reported in output even when the process exits successfully.
@@ -163,8 +165,15 @@ prev_tasks_content=""
 stale_count=0
 
 for ((i = 1; i <= MAX_ITERATIONS; i++)); do
+  if ! planning_check; then
+    log "auto-continue: stopping — $PLANNING_ERROR"
+    if [[ -x ./notify.sh ]]; then
+      ./notify.sh "Planning approval required" "$PLANNING_ERROR No agent was launched for this iteration." || log "auto-continue: planning approval notification failed"
+    fi
+    exit 1
+  fi
   # Task rows start "| S<sprint> | T<task> |" — anchored so this doesn't also match the legend line.
-  if grep -qE '^\| *S[0-9]+ *\| *T[0-9]+ *\|.*Blocked' "$TASKS_FILE"; then
+  if awk -F '|' '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ { sub(/^[^[:alnum:]]*/, "", $5); if ($5 ~ /^Blocked([[:space:]]|$)/) found=1 } END { exit !found }' "$TASKS_FILE"; then
     log "auto-continue: stopping — Blocked task found after iteration $((i - 1))"
     "$SCRIPT_DIR/check-handoff.sh" >>"$LOG_FILE" 2>&1
     exit 0
@@ -176,7 +185,7 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
   # even though a real unfinished task was found. That flips this check's
   # sense and makes the loop stop early, claiming "no unfinished tasks
   # remain" while rows further down the file are still Todo.
-  if ! awk '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ && !/Done/ { found=1 } END { exit !found }' "$TASKS_FILE"; then
+  if ! awk -F '|' '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ { sub(/^[^[:alnum:]]*/, "", $5); if ($5 !~ /^(Done|Superseded)([[:space:]]|$)/) found=1 } END { exit !found }' "$TASKS_FILE"; then
     log "auto-continue: stopping — no unfinished tasks remain"
     exit 0
   fi

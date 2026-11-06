@@ -23,6 +23,12 @@ denial. Example invocation: `/prepare-resume T032`.
    to check processes; if confirmation is missing, ask before changing task state.
 
 ## Verify the permission and saved state
+Read `.github/instructions/planning.instructions.md`, planning review, and
+approved snapshots. If planning approval is missing, Pending, or stale against
+current specs/task scope, or the specified task is Superseded, report
+`Not ready to resume <task_id>` and request `/tasks`; do not reactivate it or
+modify planning approval.
+
 1. Read `AGENTS.md`, the specifications, `docs/tasks.md`, and `docs/handoff.md`.
    Read `command-exceptions/command-exceptions.conf` using tools in the current
    workspace. If the user has not established this is the intended container

@@ -10,12 +10,13 @@
 - Planning must not implement code or mark tasks Done. Follow the active role's file-editing restrictions; request a separate handoff update if planning makes the current handoff stale.
 
 ## Implementation Session Start
+- Before selecting or changing any task, run `bash external/ai-session-kit/scripts/check-planning.sh`. If it fails, stop and request `/tasks` reconciliation and explicit developer approval. Never update `docs/planning/` or infer approval as an implementer; only the planner records approved snapshots. Never select Superseded work, even if named by a stale handoff or explicit task request.
 - When starting or resuming task implementation, read `docs/functional-spec.md`, `docs/technical-spec.md`, `docs/tasks.md`, and `docs/handoff.md` before selecting or changing a task.
 - Work the task(s) listed under "Next" in `docs/handoff.md`, but treat `docs/tasks.md`'s actual statuses as authoritative: repeated `/implement` runs in one conversation don't write a handoff between them, so the "Next" list can be stale — if a listed task is already `✅ Done`, or an earlier task is still `🔲 Todo`/`🔄 In Progress`, pick the first eligible row in `docs/tasks.md` instead of the stale entry. Don't scope-creep into later sprints beyond that. If `docs/handoff.md` is still the unedited template (e.g. `State` still reads `{What exists right now...}`), no handoff has been recorded yet — this does not necessarily mean no session has run: start from the first `🔲 Todo` or `🔄 In Progress` row in `docs/tasks.md` instead.
 - If the task you'd pick up is already `🔄 In Progress`, don't assume the previous session finished or even safely started it — check `git status`/`git diff` and run the test suite first to find the real state before resuming or restarting it.
 
 ## Implementation Methodology
-- Agile, sprint-based: work exactly one task from `docs/tasks.md` at a time, in the order sprints/tasks are listed unless told otherwise. The moment you start one, set its status to `🔄 In Progress · <today's date> (<short note of what you're about to do>)` — this is the only durable breadcrumb if the session is interrupted before `docs/handoff.md` gets updated.
+- Agile, sprint-based: work exactly one eligible, non-Superseded task from `docs/tasks.md` at a time, in the order sprints/tasks are listed unless told otherwise. The moment you start one, set its status to `🔄 In Progress · <today's date> (<short note of what you're about to do>)` — this is the only durable breadcrumb if the session is interrupted before `docs/handoff.md` gets updated.
 - Test-driven: write a failing test before implementation code, for every task, and do not move on to the next task until that task's own test passes. Set a task's status to `✅ Done · <today's date>` only when its test passes.
 
 ## Always-On Safety and Tool Use

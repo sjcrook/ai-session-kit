@@ -34,6 +34,7 @@ SKIPPED_IDENTICAL=()
 AUTO_MERGED=()
 MANUAL_MERGE=()
 PRESERVED_POLICY=()
+PRESERVED_PLANNING=()
 
 # Copies $1 (source file) to $TARGET_ROOT/$2 (relative dest path). A missing
 # destination is copied directly. An existing, identical destination is left
@@ -44,6 +45,10 @@ copy_one() {
   local src="$1" rel="$2"
   local dest="$TARGET_ROOT/$rel"
 
+  if [[ "$rel" == "docs/planning/review.md" && ( -e "$dest" || -L "$dest" ) ]]; then
+    PRESERVED_PLANNING+=("$rel")
+    return
+  fi
   if [[ "$rel" == "command-exceptions/command-exceptions.conf" && ( -e "$dest" || -L "$dest" ) ]]; then
     PRESERVED_POLICY+=("$rel")
     return
@@ -137,6 +142,7 @@ echo "  Copied: ${#COPIED[@]}"
 echo "  Already up to date: ${#SKIPPED_IDENTICAL[@]}"
 echo "  Auto-merged (upstream + local changes combined; backup kept): ${#AUTO_MERGED[@]}"
 echo "  Operator policy preserved: ${#PRESERVED_POLICY[@]}"
+echo "  Planning review preserved: ${#PRESERVED_PLANNING[@]}"
 echo "  .gitignore lines added: $gitignore_added"
 
 if [[ ${#AUTO_MERGED[@]} -gt 0 ]]; then
@@ -157,7 +163,7 @@ fi
 
 echo ""
 echo "Next steps:"
-echo "  1. Fill in docs/functional-spec.md, then docs/technical-spec.md, then use the /tasks prompt to populate docs/tasks.md."
+echo "  1. Use /functional-spec, /technical-spec, and /tasks; explicitly approve the planning proposal before implementation."
 echo "  2. Implement notify.sh with a real notification (email/Slack/etc)."
 echo "  3. Confirm this repo is vendored at exactly 'external/ai-session-kit' (the Stop hook hardcodes that path)."
 echo "  4. Before unattended container use, mount command-exceptions/ and enforcement paths read-only; see the kit README."

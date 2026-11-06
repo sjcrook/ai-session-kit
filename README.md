@@ -81,6 +81,9 @@ Cline skills and hooks, a notification stub, and a default command-exception fil
 - An existing command-exception policy is **always preserved**, without prompting
   to overwrite it, merging, or manifest tracking. A missing policy is created
   with no exceptions enabled.
+- An existing `docs/planning/review.md` is also always preserved. Approved
+  snapshots are project state, not scaffold templates, and are never overwritten
+  by the scaffold.
 - Recommended ignore entries are appended without replacing your `.gitignore`.
 - You can pass a target directory to the scaffold script instead of running it
   from the project root.
@@ -133,7 +136,7 @@ Use **Copilot Chat in Agent mode**, not the standalone CLI, for these prompts:
 |---|---|---|
 | 1. Describe the project | `/functional-spec` | Functional specification |
 | 2. Choose the design | `/technical-spec` | Technical specification |
-| 3. Break work into tasks | `/tasks` | Sprint/task list |
+| 3. Plan and review work | `/tasks` | Proposed sprint/task list; explicitly approve before implementation |
 | 4. Implement the next task | `/implement` | Tests, implementation, and task status |
 | 5. Finish your session | `/handoff` | Updated context for the next session |
 
@@ -155,8 +158,17 @@ rows are placeholders: `/tasks` fills them in place, retains their IDs, and adds
 as many tasks and sprints as the specifications require. It may clear a
 placeholder's blocker solely for missing description/acceptance criteria once
 those details are supplied, but preserves genuine Done, In Progress, and Blocked
-work. The equivalent Cline skills follow the same rules. Review the backlog
+work, except unfinished work explicitly approved for supersession. The equivalent
+Cline skills follow the same rules. Review and explicitly approve the backlog
 before implementation and request a handoff update if planning made it stale.
+
+The planner stores its proposal and requirement reconciliation in
+`docs/planning/review.md`. Only after your explicit approval does it save verbatim
+copies of both specs and the backlog in `docs/planning/` and mark the review
+Approved. Commit this directory with the project documents; you do not maintain
+duplicate specs yourself. If you decline, cancel, or defer approval, the review
+stays Pending and implementation waits. You can return to `/tasks` later to
+review and approve the current proposal.
 
 <details>
 <summary>Choosing an agent or running a prompt another way</summary>
@@ -206,18 +218,33 @@ instructions do not disable those hooks.
 ## Add or change functionality
 
 Treat the specifications as living documents and completed tasks as historical
-records. After an initial implementation:
+records. Disable auto-continue and stop unattended workers before specification
+or planning changes; re-enable it only after approval and the handoff update.
+For example, to add exponentiation to an existing calculator:
 
-1. Use `/functional-spec` to describe the approved new or changed behavior and
-  acceptance examples, preserving requirements that still apply.
-2. Use `/technical-spec` to update the affected design, interfaces, data,
-  compatibility, and verification requirements.
-3. Run `/tasks` to reconcile the current specifications against existing task
-  descriptions and acceptance criteria. Changed behavior needs new follow-up
-  tasks with fresh IDs, not reopened or rewritten completed tasks. Include
-  updates to tests that assert behavior the new requirements replace.
-4. Review the planner's requirement-coverage table and new tasks, then request
-  `/handoff` to refresh its "Next" list before `/implement` or auto-continue.
+1. Enter `/functional-spec Add exponentiation.` The agent reads the existing
+  spec, asks about missing behavior, preserves unrelated requirements, and
+  replaces contradictory old behavior. Review the changes. With just
+  `/functional-spec`, it asks what to build for a blank spec or what to
+  add/change for a populated one. Wholesale scope replacement needs confirmation.
+2. Enter `/technical-spec`. It reads the full functional spec and existing
+  design, compares with the approved baseline when available, and discovers
+  affected code/tests itself. You need not repeat requirements or know component
+  names. Answer genuine design questions and review its coverage and changes.
+3. Enter `/tasks`. For an initial backlog it plans the whole project. For an
+  existing backlog it compares specs against the last approved snapshots,
+  inspects affected code/tests/help/docs, and proposes follow-up work. It also
+  checks all current requirements so unchanged omissions are not missed. With
+  no baseline, it reports that limitation and performs full reconciliation
+  rather than inventing a change history.
+4. Review the persistent reconciliation and tasks, including obsolete tests
+  and conflicting pending work. Explicitly approve the exact plan when asked,
+  or request revisions. Completed tasks remain unchanged; approved obsolete
+  unfinished tasks become Superseded, never falsely Done. The planner records
+  approved snapshots only after approval.
+5. Enter `/handoff`, without extra wording, to refresh context and "Next" from
+  actual eligible tasks and approval state. Then enter `/implement` to work one
+  task; repeat for the remaining work and run `/handoff` when ending the session.
 
 Use the equivalent skills in Cline. A completed task is not proof that its
 acceptance criteria cover a revised requirement: a task that rejected an operator
@@ -226,16 +253,29 @@ mismatches, even without an older spec revision, and must not report "no changes
 needed" without a requirement reconciliation. Repeating `/tasks` should not
 duplicate follow-up tasks that already cover the current scope.
 
-These are agent instructions, not a deterministic requirements checker. Review
-the reconciliation before implementation. Existing installations must receive
-the updated planning prompts, agents, and skills via the [kit update
-procedure](#update-the-kit); updating this repository alone does not change
-previously scaffolded files.
+`bash external/ai-session-kit/scripts/check-planning.sh` checks that approval
+exists, both specs match the approved snapshots, and task IDs/order/descriptions
+and supersessions match the approved backlog. Normal status-only progress does
+not invalidate approval. The implementer is instructed to run this check before
+changing a task; lifecycle hooks refuse continuation and the unattended worker
+checks again before every invocation. Changed scope requires `/tasks` and
+renewed explicit approval. No separate `/change-tasks` command is needed.
+
+Planning judgments and recording the developer's approval are agent instructions,
+not a deterministic requirements checker or a security boundary. The snapshots
+prove correspondence to a reviewed plan, not that its coverage or code is correct.
+Review the reconciliation before implementation. Existing installations must
+receive the updated prompts, agents, skills, shared instructions, and pending
+review template via the [kit update procedure](#update-the-kit). Their first
+`/tasks` run establishes an explicitly approved baseline; implementation waits
+until then. Updating this repository alone does not change previously scaffolded
+files.
 
 ## Run unattended
 
 Auto-continue starts separate AI sessions to work through successive tasks.
-It stops when the task list is complete, any task is marked Blocked, a CLI
+It stops when planning approval is missing/pending/stale, the task list is
+complete (Done or Superseded), any task is marked Blocked, a CLI
 invocation fails or reports an abort, progress stalls, or the run limit is reached.
 The default limit is **10 sessions**, normally one task attempt per session.
 

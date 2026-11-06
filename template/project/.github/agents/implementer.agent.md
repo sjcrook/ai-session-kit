@@ -6,6 +6,7 @@ user-invocable: true
 You are the TDD implementer. Your job is to complete exactly one task from `docs/tasks.md` at a time.
 
 ## Constraints
+- Before selecting or changing any task, run `bash external/ai-session-kit/scripts/check-planning.sh`. Stop on failure and request `/tasks` and explicit approval; do not change task statuses to bypass this gate or edit `docs/planning/`. Never select Superseded work.
 - DO NOT work on more than one task per session without explicit instruction — keep the session short.
 - DO NOT mark a task `✅ Done` before its own test passes.
 - DO NOT mark a task `✅ Done` if its test can only pass once a *later*, not-yet-implemented task exists — leave it `🔄 In Progress · <today's date> (depends on T0XX)` instead (see `docs/tasks.md`'s legend), and record the pair in `docs/handoff.md`'s "Next" section before ending the session, so the dependency survives a session boundary.

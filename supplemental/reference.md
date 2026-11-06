@@ -40,6 +40,15 @@ selection guides the workflow but is not a permission that only you can grant:
 the agent can change its recorded role. Making the guard read-only does not
 change that. Operator-approved command exceptions do not override the role check.
 
+Planning approval in `docs/planning/` is separate from operator command
+exceptions. The planner needs write access to record reviewed snapshots; the
+implementer is instructed not to modify them. The continuation check compares
+those writable snapshots with current documents, so this is a workflow guard,
+not independent proof of human authorization. For stronger separation, protect
+`docs/planning/` read-only during implementation and reopen it only for supervised
+planning. Do not make it permanently read-only while expecting `/tasks` to
+record approval.
+
 ### Mount example
 
 The following example shows read-only mounts in a Dev Container configuration.

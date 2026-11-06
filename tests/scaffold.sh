@@ -30,7 +30,8 @@ if [[ -f "$manifest" ]]; then
 fi
 echo 'PASS: a fresh scaffold records the current kit commit without gitignoring it'
 
-for path in AGENTS.md docs/tasks.md .github/prompts/tasks.prompt.md \
+for path in AGENTS.md docs/tasks.md docs/planning/review.md \
+  .github/instructions/planning.instructions.md .github/prompts/tasks.prompt.md \
   .github/agents/planner.agent.md .cline/skills/tasks/SKILL.md \
   .cline/skills/planner/SKILL.md; do
   cmp "$project/$path" "$KIT_ROOT/template/project/$path"
@@ -50,16 +51,35 @@ echo 'PASS: planning workflows install full-backlog and protected-placeholder in
 
 for path in .github/prompts/tasks.prompt.md .github/agents/planner.agent.md \
   .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do
-  for constraint in '## Requirement reconciliation' \
-    'A Done status is historical evidence, not proof of coverage for a changed requirement.' \
-    'append new Todo follow-up tasks with fresh sequential IDs' \
-    'including removal or replacement of obsolete tests' \
-    'Requirement | Existing task IDs | Coverage or mismatch | New task IDs or blocker' \
-    'Do not claim "no changes needed" without this reconciliation.'; do
+  for constraint in 'planning.instructions.md' 'explicit developer approval' \
+    'docs/planning/' 'Approved last'; do
     grep -F "$constraint" "$project/$path" >/dev/null
   done
 done
-echo 'PASS: planning workflows require changed-requirement reconciliation and follow-up tasks'
+for constraint in 'Initial planning:' 'Change planning:' 'Missing/incomplete baseline:' \
+  'A Done status is historical evidence, not proof of coverage for a changed requirement.' \
+  'append new Todo follow-up tasks with fresh sequential IDs' \
+  'including removal or replacement of obsolete tests' \
+  'Requirement | Existing task IDs | Coverage or mismatch | New task IDs or blocker' \
+  'Do not claim "no changes needed" without this reconciliation.' \
+  'Preserve unrelated requirements' 'do not ask the developer to enumerate changed requirements' \
+  'Never infer approval' 'Superseded' 'Status: Approved'; do
+  grep -F "$constraint" "$project/.github/instructions/planning.instructions.md" >/dev/null
+done
+grep -Fx 'Status: Pending' "$project/docs/planning/review.md" >/dev/null
+[[ ! -e "$project/docs/planning/functional-spec.md" ]]
+for path in .github/prompts/functional-spec.prompt.md .github/prompts/technical-spec.prompt.md \
+  .github/prompts/handoff.prompt.md .github/agents/handoff-writer.agent.md \
+  .cline/skills/functional-spec/SKILL.md .cline/skills/technical-spec/SKILL.md \
+  .cline/skills/handoff/SKILL.md .cline/skills/handoff-writer/SKILL.md; do
+  grep -F 'planning.instructions.md' "$project/$path" >/dev/null
+done
+for path in AGENTS.md .github/prompts/implement.prompt.md \
+  .github/agents/implementer.agent.md .cline/skills/implementer/SKILL.md; do
+  grep -F 'check-planning.sh' "$project/$path" >/dev/null
+  grep -F 'Superseded' "$project/$path" >/dev/null
+done
+echo 'PASS: both integrations install shared spec preservation, change planning, explicit approval, and implementation checks'
 
 for constraint in 'General conversation is the default.' \
   'Do not automatically read project documents, select tasks, change task statuses, or write a handoff for a general question.' \
@@ -133,3 +153,13 @@ rm "$policy"
 bash "$KIT_ROOT/template/create-scaffold-kit.sh" "$project" </dev/null >"$TEST_ROOT/output"
 cmp "$policy" "$KIT_ROOT/template/project/command-exceptions/command-exceptions.conf"
 echo 'PASS: missing policy is recreated with default restrictions'
+
+printf 'Status: Approved\nReviewed project state\n' >"$project/docs/planning/review.md"
+printf 'Approved functional snapshot\n' >"$project/docs/planning/functional-spec.md"
+cp "$project/docs/planning/review.md" "$TEST_ROOT/approved-review"
+bash "$KIT_ROOT/template/create-scaffold-kit.sh" "$project" </dev/null >"$TEST_ROOT/output"
+cmp "$project/docs/planning/review.md" "$TEST_ROOT/approved-review"
+grep -Fx 'Approved functional snapshot' "$project/docs/planning/functional-spec.md" >/dev/null
+grep -F 'Planning review preserved: 1' "$TEST_ROOT/output" >/dev/null
+[[ -z "$(find "$project/docs/planning" -name '*.bak.*' -print)" ]]
+echo 'PASS: scaffold updates preserve project planning review and approved snapshots'

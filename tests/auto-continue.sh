@@ -9,16 +9,25 @@ cleanup() {
     "$TEST_ROOT/.ai-session/auto-continue.pid" "$TEST_ROOT/.github/auto-continue-enabled" \
     "$TEST_ROOT/.cline/.active-role" "$TEST_ROOT/notify.sh" \
     "$TEST_ROOT/calls" "$TEST_ROOT/notifications" "$TEST_ROOT/args" \
-    "$TEST_ROOT/command-exceptions/command-exceptions.conf"
+    "$TEST_ROOT/command-exceptions/command-exceptions.conf" \
+    "$TEST_ROOT/docs/functional-spec.md" "$TEST_ROOT/docs/technical-spec.md" \
+    "$TEST_ROOT/docs/planning/functional-spec.md" "$TEST_ROOT/docs/planning/technical-spec.md" \
+    "$TEST_ROOT/docs/planning/tasks.md" "$TEST_ROOT/docs/planning/review.md"
+  rmdir "$TEST_ROOT/docs/planning"
   rmdir "$TEST_ROOT/bin" "$TEST_ROOT/docs" "$TEST_ROOT/.ai-session" "$TEST_ROOT/.github" "$TEST_ROOT/.cline" "$TEST_ROOT/tmp" "$TEST_ROOT/command-exceptions" "$TEST_ROOT"
 }
 trap cleanup EXIT
-mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/docs" "$TEST_ROOT/.ai-session" "$TEST_ROOT/.github" "$TEST_ROOT/.cline" "$TEST_ROOT/tmp" "$TEST_ROOT/command-exceptions"
+mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/docs/planning" "$TEST_ROOT/.ai-session" "$TEST_ROOT/.github" "$TEST_ROOT/.cline" "$TEST_ROOT/tmp" "$TEST_ROOT/command-exceptions"
+printf 'Calculator requirements\n' >"$TEST_ROOT/docs/functional-spec.md"
+printf 'Calculator design\n' >"$TEST_ROOT/docs/technical-spec.md"
+cp "$TEST_ROOT/docs/functional-spec.md" "$TEST_ROOT/docs/planning/functional-spec.md"
+cp "$TEST_ROOT/docs/technical-spec.md" "$TEST_ROOT/docs/planning/technical-spec.md"
 
 cat >"$TEST_ROOT/bin/cline" <<'MOCK'
 #!/usr/bin/env bash
 for guidance in 'including temporary cleanup and test setup' \
-  'Never retry or disguise a denied operation' 'Cancellation is not completion'; do
+  'Never retry or disguise a denied operation' 'Cancellation is not completion' \
+  'check-planning.sh' 'Never select Superseded work'; do
   if [[ "$*" != *"$guidance"* ]]; then
     echo "Missing continuation prompt guidance: $guidance" >&2
     exit 99
@@ -32,6 +41,14 @@ case "$MOCK_MODE" in
   timeout) echo '[abort] aborted after timeout'; exit 1 ;;
   failure) echo 'provider failed' >&2; exit 7 ;;
   stale) echo 'No changes'; exit 0 ;;
+  spec-drift)
+    printf 'Changed requirements\n' >>docs/functional-spec.md
+    echo 'Specifications changed during the iteration'
+    ;;
+  task-drift)
+    printf '| S01 | T001 | Unapproved replacement | Todo |\n' >docs/tasks.md
+    echo 'Task scope changed during the iteration'
+    ;;
   progress)
     if [[ "$(wc -l <calls | tr -d ' ')" == 1 ]]; then
       echo 'Task one complete'
@@ -64,7 +81,19 @@ chmod +x "$TEST_ROOT/bin/cline" "$TEST_ROOT/bin/copilot" "$TEST_ROOT/notify.sh"
 
 run_case() {
   local cli="$1" mode="$2" expected_status="$3" expected_calls="$4" expected_log="$5"
+  printf 'Calculator requirements\n' >"$TEST_ROOT/docs/functional-spec.md"
+  printf 'Calculator design\n' >"$TEST_ROOT/docs/technical-spec.md"
+  cp "$TEST_ROOT/docs/functional-spec.md" "$TEST_ROOT/docs/planning/functional-spec.md"
+  cp "$TEST_ROOT/docs/technical-spec.md" "$TEST_ROOT/docs/planning/technical-spec.md"
   printf '| S01 | T001 | Example | Todo |\n' >"$TEST_ROOT/docs/tasks.md"
+  if [[ "$mode" == progress || "$mode" == policy-change ]]; then
+    printf '| S01 | T001 | First | Todo |\n| S01 | T002 | Second | Todo |\n' >"$TEST_ROOT/docs/tasks.md"
+  fi
+  if [[ "$mode" == superseded ]]; then
+    printf '| S01 | T001 | Example | Superseded · scope removed |\n' >"$TEST_ROOT/docs/tasks.md"
+  fi
+  cp "$TEST_ROOT/docs/tasks.md" "$TEST_ROOT/docs/planning/tasks.md"
+  printf 'Status: Approved\n' >"$TEST_ROOT/docs/planning/review.md"
   : >"$TEST_ROOT/.ai-session/auto-continue.log"
   if [[ "$mode" == success ]]; then
     printf '\033[2m[abort] aborted by another client\033[0m\n' >>"$TEST_ROOT/.ai-session/auto-continue.log"
@@ -132,3 +161,27 @@ run_case copilot policy-change 0 2 'no unfinished tasks remain'
 [[ "$(grep -Fxc -- '--deny-tool=shell(rm -rf:*)' "$TEST_ROOT/args")" == 1 ]]
 [[ "$(grep -Fxc -- '--deny-tool=shell(git push:*)' "$TEST_ROOT/args")" == 2 ]]
 echo 'PASS: policy is reloaded between Copilot invocations'
+
+: >"$TEST_ROOT/command-exceptions/command-exceptions.conf"
+for cli in cline copilot; do
+  run_case "$cli" spec-drift 1 1 'Specifications differ'
+  run_case "$cli" task-drift 1 1 'Task scope'
+  run_case "$cli" superseded 0 0 'no unfinished tasks remain'
+done
+echo 'PASS: approval is rechecked between iterations and superseded work never launches an agent'
+
+for cli in cline copilot; do
+  printf 'Status: Pending\n' >"$TEST_ROOT/docs/planning/review.md"
+  : >"$TEST_ROOT/calls"
+  : >"$TEST_ROOT/notifications"
+  status=0
+  (
+    cd "$TEST_ROOT"
+    PATH="$TEST_ROOT/bin:$PATH" AUTO_CONTINUE_CLI="$cli" \
+      MOCK_MODE=success bash "$SCRIPT_DIR/auto-continue.sh"
+  ) || status=$?
+  [[ "$status" == 1 ]]
+  [[ ! -s "$TEST_ROOT/calls" ]]
+  grep -F 'Planning approval required' "$TEST_ROOT/notifications" >/dev/null
+done
+echo 'PASS: pending planning review prevents either CLI from launching'
