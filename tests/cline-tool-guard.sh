@@ -65,9 +65,11 @@ echo 'PASS: normal test commands allowed'
 
 for role in planner handoff-writer; do
   printf '%s' "$role" >.cline/.active-role
-  result="$(printf '%s' '{"toolName":"run_commands","command":"echo example"}' | bash "$SCRIPT_DIR/cline-tool-guard.sh")"
-  [[ "$result" == *'"cancel": true'* ]]
-  grep -F "denied tool=run_commands role=$role" .ai-session/auto-continue.log >/dev/null
+  for tool in run_commands execute_command; do
+    result="$(printf '{"toolName":"%s","command":"echo example"}' "$tool" | bash "$SCRIPT_DIR/cline-tool-guard.sh")"
+    [[ "$result" == *'"cancel": true'* ]]
+    grep -F "denied tool=$tool role=$role" .ai-session/auto-continue.log >/dev/null
+  done
   result="$(printf '%s' "$editor_payload" | bash "$SCRIPT_DIR/cline-tool-guard.sh")"
   [[ "$result" == '{"cancel": false}' ]]
 done

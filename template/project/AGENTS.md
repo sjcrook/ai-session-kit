@@ -9,6 +9,25 @@
 - Specification and planning commands (`/functional-spec`, `/technical-spec`, `/tasks`, and the equivalent skills or planner role) prepare or revise project documents, not implementation. They may cover the full requested scope regardless of the handoff's "Next" list; the one-task/TDD execution rules and 1-3-task session limits below apply only to implementation sessions.
 - Planning must not implement code or mark tasks Done. Follow the active role's file-editing restrictions; request a separate handoff update if planning makes the current handoff stale.
 
+## Literal Slash Commands
+This section is best-effort guidance, not a command dispatcher. In Copilot, explicitly select `planner` for `/tasks`, `implementer` for `/implement`, and `handoff-writer` for `/handoff`, `/recover-handoff`, or `/prepare-resume`. Automatic prompt/agent routing is not reliable in every chat interface; reading this mapping does not select a custom agent or enforce its tool restrictions.
+
+Some chat interfaces send slash commands as plain text instead of expanding prompt files. When the user's request starts with a command below (alone or followed by arguments), execute its workspace workflow; do not interpret it as a status query. Read the mapped prompt and role instructions from disk on each invocation, even in an existing conversation, and follow their referenced instructions before acting.
+
+| Command | Prompt to read | Role instructions to read |
+|---|---|---|
+| `/functional-spec` | `.github/prompts/functional-spec.prompt.md` | No custom role |
+| `/technical-spec` | `.github/prompts/technical-spec.prompt.md` | No custom role |
+| `/tasks` | `.github/prompts/tasks.prompt.md` | `.github/agents/planner.agent.md` |
+| `/handoff` | `.github/prompts/handoff.prompt.md` | `.github/agents/handoff-writer.agent.md` |
+| `/implement` | `.github/prompts/implement.prompt.md` | `.github/agents/implementer.agent.md` |
+| `/recover-handoff` | `.github/prompts/recover-handoff.prompt.md` | `.github/agents/handoff-writer.agent.md` |
+| `/prepare-resume` | `.github/prompts/prepare-resume.prompt.md` | `.github/agents/handoff-writer.agent.md` |
+
+Treat text after the command as workflow input, not a replacement for its instructions. Apply the role's tool and file restrictions yourself if the interface has not selected that role; reading a role file does not enforce tool permissions. In Cline, use the matching `.cline/skills/<command>/SKILL.md` instead (`/implement` maps to `.cline/skills/implementer/SKILL.md`), including its initial role marker. Do not execute both the prompt and skill workflows.
+
+For `/tasks`, read `.github/instructions/planning.instructions.md`, both specs, the backlog, and planning review/baseline. Reconcile requirements and inspect affected implementation evidence even when every existing task is Done. A count of completed tasks is not a planning result; persist the reconciliation and request explicit approval as the workflow requires. If a required workflow file is missing or unreadable, report the problem and stop rather than substituting a status summary. Questions discussing a command (rather than invoking it) remain general conversation.
+
 ## Implementation Session Start
 - Before selecting or changing any task, run `bash external/ai-session-kit/scripts/check-planning.sh`. If it fails, stop and request `/tasks` reconciliation and explicit developer approval. Never update `docs/planning/` or infer approval as an implementer; only the planner records approved snapshots. Never select Superseded work, even if named by a stale handoff or explicit task request.
 - When starting or resuming task implementation, read `docs/functional-spec.md`, `docs/technical-spec.md`, `docs/tasks.md`, and `docs/handoff.md` before selecting or changing a task.

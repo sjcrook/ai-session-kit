@@ -130,15 +130,34 @@ document reads.
 
 ### GitHub Copilot
 
-Use **Copilot Chat in Agent mode**, not the standalone CLI, for these prompts:
+Use **Copilot Chat** and explicitly select the agent below before running each
+workflow. This is the verified route when automatic prompt/agent selection is
+unreliable. The same right-hand Chat panel can dispatch requests differently:
+typing a slash command alone does not prove its workspace prompt or custom
+agent was selected.
 
-| Step | Enter in chat | Result |
-|---|---|---|
-| 1. Describe the project | `/functional-spec` | Functional specification |
-| 2. Choose the design | `/technical-spec` | Technical specification |
-| 3. Plan and review work | `/tasks` | Proposed sprint/task list; explicitly approve before implementation |
-| 4. Implement the next task | `/implement` | Tests, implementation, and task status |
-| 5. Finish your session | `/handoff` | Updated context for the next session |
+| Step | Select in agent picker | Enter in chat | Result |
+|---|---|---|---|
+| 1. Describe the project | Agent | `/functional-spec` | Functional specification |
+| 2. Choose the design | Agent | `/technical-spec` | Technical specification |
+| 3. Plan and review work | planner | `/tasks` | Proposed sprint/task list; explicitly approve before implementation |
+| 4. Implement the next task | implementer | `/implement` | Tests, implementation, and task status |
+| 5. Finish your session | handoff-writer | `/handoff` | Updated context for the next session |
+
+Select the workspace prompt from suggestions when available. After a kit update
+and scaffold, reload the VS Code window and start a fresh chat. If a custom
+agent is missing from the picker, resolve workspace agent discovery before
+proceeding. A `/tasks` response must reconcile requirements and request approval
+with links to the review and backlog, not merely count completed tasks.
+
+The installed `AGENTS.md` command mapping and `.github/copilot-instructions.md`
+entry point provide best-effort guidance when commands arrive as literal text.
+They are **not a verified substitute for agent selection**: automatic routing
+failed in observed SDK/agent-host sessions, even after reloading. Reading role
+instructions does not select the actual role or enforce its tool restrictions.
+An explicit "read AGENTS.md" request can help diagnose loading, but is not the
+recommended normal workflow. Installation tests validate installed guidance and
+approval checks, not the chat interface's automatic routing.
 
 For later sessions, use `/implement` to continue or specify a task to the
 `implementer` agent.
@@ -174,11 +193,15 @@ review and approve the current proposal.
 <summary>Choosing an agent or running a prompt another way</summary>
 
 The agent picker offers `planner` for task planning, `implementer` for code and
-tests, and `handoff-writer` for recording progress. The prompts select the
-appropriate agent for you. Only the implementer has shell-tool access.
+tests, and `handoff-writer` for recording progress. Workspace prompts declare
+their intended agent, but automatic selection is not reliable in every chat
+execution path; verify the picker explicitly. Planner and handoff-writer custom
+agents omit shell tools; the general Agent used for specification work and the
+implementer have different tool availability.
 
 You can also use **Chat: Run Prompt...** in the Command Palette, or open a
-prompt file and click its play button.
+prompt file and click its play button. These are invocation options, not proof
+that a particular interface expanded the prompt or selected its declared agent.
 
 </details>
 
@@ -202,6 +225,13 @@ Ask Cline to run these skills in order:
 
 You can also use `/<skill-name>`, such as `/implementer`. The same skills are
 available in the CLI; for example, `cline "run the implementer skill"`.
+
+Cline's tasks and planner skills use native file tools only, including for
+writing the role marker, inspecting the repository, and saving approved
+snapshots. They must not invoke shell tools for setup or verification.
+With hooks enabled, a shell attempt is rejected and may cancel the task;
+the diagnostic is recorded in `.ai-session/auto-continue.log`.
+The implementer, not the planner, runs `check-planning.sh`.
 
 **Before ending an implementation session, request the handoff.** Stopping a session
 does not automatically write it, and running the implementer skill again in the
@@ -254,7 +284,8 @@ needed" without a requirement reconciliation. Repeating `/tasks` should not
 duplicate follow-up tasks that already cover the current scope.
 
 `bash external/ai-session-kit/scripts/check-planning.sh` checks that approval
-exists, both specs match the approved snapshots, and task IDs/order/descriptions
+exists, both specs match the approved snapshots (ignoring only an optional final
+newline), and task IDs/order/descriptions
 and supersessions match the approved backlog. Normal status-only progress does
 not invalidate approval. The implementer is instructed to run this check before
 changing a task; lifecycle hooks refuse continuation and the unattended worker

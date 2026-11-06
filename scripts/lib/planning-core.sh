@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 # Shared planning approval check; assumes cwd is the consuming project root.
 
+planning_specs_match() {
+  # Compare lines exactly, allowing only an optional final newline.
+  awk '
+    FILENAME == ARGV[1] { lines[++count] = $0; next }
+    { compared++; if (("x" $0) != ("x" lines[compared])) exit 1 }
+    END { if (count != compared) exit 1 }
+  ' "$1" "$2"
+}
+
 planning_task_scope() {
   awk -F '|' '
     /^\| *S[^|]*\| *T[^|]*\|/ {
       if (NF != 6) exit 1
       for (i=2; i<=5; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+      if ($2 == "Sprint" && $3 == "Task") next
       if ($2 !~ /^S[0-9]+$/ || $3 !~ /^T[0-9]+$/ || $4 == "" || seen[$3]++) exit 1
       sub(/^[^[:alnum:]]*/, "", $5)
       if ($5 !~ /^(Todo|In Progress|Done|Blocked|Superseded)([[:space:]]|$)/) exit 1
@@ -32,7 +42,7 @@ planning_check() {
       PLANNING_ERROR="Planning baseline or current documents are missing, empty, or unreadable. Run /tasks for reconciliation and explicit approval."
       return 1
     fi
-    if [[ "$name" != tasks ]] && ! cmp -s "docs/$name.md" "docs/planning/$name.md"; then
+    if [[ "$name" != tasks ]] && ! planning_specs_match "docs/$name.md" "docs/planning/$name.md"; then
       PLANNING_ERROR="Specifications differ from the approved planning baseline. Run /tasks and approve the updated plan."
       return 1
     fi

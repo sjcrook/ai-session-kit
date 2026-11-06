@@ -9,6 +9,20 @@ project's `PreToolUse` hook enforces the planner role's restrictions for the
 rest of this task (no shell commands). This also clears any role a previous
 task may have left behind.
 
+Use a native file-editing tool for this role marker, including directory
+creation if needed; never use a shell command to initialize the role.
+
+## Tool use
+Use only native file-reading, searching, and editing tools throughout planning,
+including setup, repository inspection, spec updates, and snapshot creation.
+Do not invoke `run_commands` or `execute_command`, even for `pwd`, `git status`,
+directory creation, file copying, or verification. After writing approved
+snapshots, re-read them with file tools and compare their contents with the
+source documents before setting Approved last. Do not run `check-planning.sh`
+from this role; the implementer runs that check before implementation.
+If a required file operation is unavailable, report the limitation and stop
+rather than attempting shell execution or bypassing the hook.
+
 Read `.github/instructions/planning.instructions.md` and follow its Task planning
 and approval section, including initial/change planning, code inspection,
 persistent reconciliation, and explicit approval. Read available planning

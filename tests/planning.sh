@@ -20,7 +20,7 @@ expect_rejected 'missing or pending'
 mkdir -p docs/planning .github
 printf 'Operators: + - * /\n' >docs/functional-spec.md
 printf 'Parser and evaluator\n' >docs/technical-spec.md
-printf '| S01 | T001 | Reject exponentiation; acceptance: error for 2 ^ 3 | Done |\n' >docs/tasks.md
+printf '| Sprint | Task | Description | Status |\n|---|---|---|---|\n| S01 | T001 | Reject exponentiation; acceptance: error for 2 ^ 3 | Done |\n' >docs/tasks.md
 printf 'Status: Pending\n' >docs/planning/review.md
 expect_rejected 'missing or pending'
 printf 'Status: Approved\n' >docs/planning/review.md
@@ -31,6 +31,22 @@ done
 bash "$KIT_ROOT/scripts/check-planning.sh" >output
 grep -Fx 'Planning approval is current.' output >/dev/null
 echo 'PASS: initial planning needs explicit approval and complete snapshots'
+
+printf 'Operators: + - * /' >docs/functional-spec.md
+planning_check
+printf 'Parser and evaluator' >docs/planning/technical-spec.md
+planning_check
+printf 'Parser and evaluator\n\n' >docs/planning/technical-spec.md
+expect_rejected 'Specifications differ'
+printf 'Parser  and evaluator\n' >docs/planning/technical-spec.md
+expect_rejected 'Specifications differ'
+printf 'Parser and evaluator\n' >docs/planning/technical-spec.md
+printf '01' >docs/functional-spec.md
+printf '1\n' >docs/planning/functional-spec.md
+expect_rejected 'Specifications differ'
+printf 'Operators: + - * /\n' >docs/functional-spec.md
+cp docs/functional-spec.md docs/planning/functional-spec.md
+echo 'PASS: optional final newlines are accepted; blank lines, spacing, and numeric text changes are rejected'
 
 printf 'Operators: + - * / ^; 2 ^ 3 = 8\n' >docs/functional-spec.md
 expect_rejected 'Specifications differ'

@@ -43,12 +43,12 @@ Persist a reconciliation table in `docs/planning/review.md` and include it in th
 Use requirement IDs when available, otherwise spec sections/acceptance examples. Include removed requirements and implementation evidence. Do not claim "no changes needed" without this reconciliation. Report a stale handoff for a separate update; do not edit it.
 
 ### Explicit approval
-Show the proposed backlog, reconciliation, unresolved blockers, and any proposed supersessions. Ask the developer to approve this exact plan, request revisions, or leave it pending. Never infer approval from invoking `/tasks`, silence, or successful tests. If an interactive question tool is unavailable, request approval in chat and stop with review Pending.
+Show the proposed backlog, reconciliation, unresolved blockers, and any proposed supersessions. Before asking for approval, provide clickable links to `docs/planning/review.md` and `docs/tasks.md`, using paths resolved against the current workspace (not the kit templates). Also include those links in the approval question's message so the developer can open the exact documents from the question itself. State which task IDs and dispositions are being approved. Ask the developer to approve this exact plan, request revisions, or leave it pending. Never infer approval from invoking `/tasks`, silence, or successful tests. If an interactive question tool is unavailable, request approval in chat with the same links and stop with review Pending.
 
 On explicit approval only:
 1. Re-read the current specs/tasks. If substantive content changed since the proposal, reconcile again and obtain approval of the revised plan.
 2. Apply only the approved supersessions.
-3. Copy the complete current documents verbatim, using file-editing tools, to `docs/planning/functional-spec.md`, `docs/planning/technical-spec.md`, and `docs/planning/tasks.md`. These are approved snapshots, not separately maintained specs.
+3. Copy the complete current documents verbatim, using file-editing tools, to `docs/planning/functional-spec.md`, `docs/planning/technical-spec.md`, and `docs/planning/tasks.md`. These are approved snapshots, not separately maintained specs. Do not edit the source specs to create snapshots. The approval check tolerates an optional final newline added by an editor, but no other spec content differences.
 4. Record the developer's explicit approval and approved dispositions in `docs/planning/review.md`, then write `Status: Approved` last.
 
 For a later approval in a new conversation, read the persisted proposal and current documents, present the exact current plan again, and obtain explicit approval. Declined/cancelled review remains Pending. Never advance the baseline merely because planning finished. Repeating `/tasks` may refresh evidence but must not duplicate tasks. Approval is required even if no task additions are needed.

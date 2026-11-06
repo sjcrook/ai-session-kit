@@ -30,7 +30,7 @@ if [[ -f "$manifest" ]]; then
 fi
 echo 'PASS: a fresh scaffold records the current kit commit without gitignoring it'
 
-for path in AGENTS.md docs/tasks.md docs/planning/review.md \
+for path in AGENTS.md .github/copilot-instructions.md docs/tasks.md docs/planning/review.md \
   .github/instructions/planning.instructions.md .github/prompts/tasks.prompt.md \
   .github/agents/planner.agent.md .cline/skills/tasks/SKILL.md \
   .cline/skills/planner/SKILL.md; do
@@ -48,6 +48,18 @@ done
 grep -Fx 'agent: planner' "$project/.github/prompts/tasks.prompt.md" >/dev/null
 grep -Fx 'tools: [read, search, edit]' "$project/.github/agents/planner.agent.md" >/dev/null
 echo 'PASS: planning workflows install full-backlog and protected-placeholder instructions'
+
+for path in .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do
+  for constraint in 'Use a native file-editing tool for this role marker' \
+    'Use only native file-reading, searching, and editing tools throughout planning' \
+    'Do not invoke `run_commands` or `execute_command`' \
+    'snapshots, re-read them with file tools' \
+    'Do not run `check-planning.sh`' \
+    'report the limitation and stop'; do
+    grep -F "$constraint" "$project/$path" >/dev/null
+  done
+done
+echo 'PASS: Cline planning skills install native-file-tool guidance for setup, inspection, and snapshots'
 
 for path in .github/prompts/tasks.prompt.md .github/agents/planner.agent.md \
   .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do
@@ -94,6 +106,34 @@ done
 grep -F 'For specification, planning, handoff, recovery, and resume-preparation requests, read only the context required by the invoked prompt or skill.' "$project/AGENTS.md" >/dev/null
 grep -F 'Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md.' "$KIT_ROOT/scripts/auto-continue.sh" >/dev/null
 echo 'PASS: general conversation defaults to no workflow bookkeeping while preserving safety and auto-continue context'
+
+grep -F '## Literal Slash Commands' "$project/AGENTS.md" >/dev/null
+grep -F 'Read the mapped prompt and role instructions from disk on each invocation' "$project/AGENTS.md" >/dev/null
+grep -F 'even when every existing task is Done' "$project/AGENTS.md" >/dev/null
+grep -F 'A count of completed tasks is not a planning result' "$project/AGENTS.md" >/dev/null
+grep -F 'reading a role file does not enforce tool permissions' "$project/AGENTS.md" >/dev/null
+grep -F 'Do not execute both the prompt and skill workflows' "$project/AGENTS.md" >/dev/null
+for command in functional-spec technical-spec tasks handoff implement recover-handoff prepare-resume; do
+  grep -F "| \`/$command\` | \`.github/prompts/$command.prompt.md\` |" "$project/AGENTS.md" >/dev/null
+  [[ -f "$project/.github/prompts/$command.prompt.md" ]]
+  skill="$command"
+  [[ "$command" != implement ]] || skill=implementer
+  [[ -f "$project/.cline/skills/$skill/SKILL.md" ]]
+done
+for role in planner handoff-writer implementer; do
+  [[ -f "$project/.github/agents/$role.agent.md" ]]
+done
+grep -F 'best-effort guidance, not a command dispatcher' "$project/AGENTS.md" >/dev/null
+grep -F 'explicitly select `planner`' "$project/AGENTS.md" >/dev/null
+echo 'PASS: installed command mapping documents explicit agent selection and best-effort limitations'
+grep -F '[AGENTS.md](../AGENTS.md)' "$project/.github/copilot-instructions.md" >/dev/null
+grep -F 'Read it from disk before' "$project/.github/copilot-instructions.md" >/dev/null
+grep -F 'status summary' "$project/.github/copilot-instructions.md" >/dev/null
+grep -F "include those links in the approval question's message" "$project/.github/instructions/planning.instructions.md" >/dev/null
+for path in .github/agents/planner.agent.md .cline/skills/planner/SKILL.md; do
+  grep -F 'clickable Markdown links' "$project/$path" >/dev/null
+done
+echo 'PASS: Copilot entry point and planner outputs include loading guidance and review-link requirements'
 
 cmp "$project/docs/handoff.md" "$KIT_ROOT/template/project/docs/handoff.md"
 grep -F 'no handoff has been recorded yet' "$project/docs/handoff.md" >/dev/null
