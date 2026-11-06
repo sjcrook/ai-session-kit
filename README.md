@@ -159,6 +159,11 @@ An explicit "read AGENTS.md" request can help diagnose loading, but is not the
 recommended normal workflow. Installation tests validate installed guidance and
 approval checks, not the chat interface's automatic routing.
 
+If a kit workflow asks to read `AGENTS.md` outside the project, decline that
+request and confirm the project root. The entry point's `../AGENTS.md` link is
+relative to its containing `.github/` directory, not the shell working directory;
+file tools should read `<repository-root>/AGENTS.md`.
+
 For later sessions, use `/implement` to continue or specify a task to the
 `implementer` agent.
 

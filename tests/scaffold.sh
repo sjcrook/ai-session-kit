@@ -128,6 +128,9 @@ grep -F 'explicitly select `planner`' "$project/AGENTS.md" >/dev/null
 echo 'PASS: installed command mapping documents explicit agent selection and best-effort limitations'
 grep -F '[AGENTS.md](../AGENTS.md)' "$project/.github/copilot-instructions.md" >/dev/null
 grep -F 'Read it from disk before' "$project/.github/copilot-instructions.md" >/dev/null
+grep -F 'file in `.github/`, not relative to the working directory.' "$project/.github/copilot-instructions.md" >/dev/null
+grep -F '`<repository-root>/AGENTS.md`; do not use `<repository-root>/../AGENTS.md`.' "$project/.github/copilot-instructions.md" >/dev/null
+grep -F 'ask the developer rather than probing parent folders.' "$project/.github/copilot-instructions.md" >/dev/null
 grep -F 'status summary' "$project/.github/copilot-instructions.md" >/dev/null
 grep -F "include those links in the approval question's message" "$project/.github/instructions/planning.instructions.md" >/dev/null
 for path in .github/agents/planner.agent.md .cline/skills/planner/SKILL.md; do

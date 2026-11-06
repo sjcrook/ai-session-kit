@@ -1,7 +1,13 @@
 # Project workflow entry point
 
 Follow the repository-root [AGENTS.md](../AGENTS.md). Read it from disk before
-executing any kit slash command, including a literal `/tasks` message that the
+executing any kit slash command. Resolve this link relative to this instruction
+file in `.github/`, not relative to the working directory. For file tools, use
+`<repository-root>/AGENTS.md`; do not use `<repository-root>/../AGENTS.md`.
+The repository root is the current project's Git root, not its parent directory.
+If the root is uncertain, ask the developer rather than probing parent folders.
+
+This includes a literal `/tasks` message that the
 chat interface has not expanded. Use its Literal Slash Commands mapping to load
 the current workspace prompt, role, and referenced workflow instructions.
 `/tasks` requests requirement reconciliation and backlog planning, not a task
