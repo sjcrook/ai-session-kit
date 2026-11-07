@@ -23,6 +23,10 @@ The kit adds instructions and four documents to your project:
 
 You keep these files in your application's repository. During task implementation,
 the AI is instructed to work on one task at a time, write tests first, and record progress before stopping.
+New or changed behavior needs a genuinely failing acceptance test before implementation.
+Regression-only tests for existing behavior may pass immediately; report that honestly,
+without incorrect expectations or deliberately breaking code to manufacture a red phase.
+Source and test changes must use file-editing tools, not shell writes.
 Review its changes and test results; instructions do not guarantee correctness.
 
 ## Start here
@@ -378,8 +382,13 @@ Use `copilot` instead of `cline` to select Copilot. The command runs in the
 terminal and appends output to `.ai-session/auto-continue.log`.
 
 The kit creates `.ai-session/` in your application's root for logs and the
-running worker's PID file. This directory is writable and ignored by Git;
+running worker's PID file and atomic `auto-continue.lock` directory. The lock
+prevents simultaneous hooks from launching competing workers. This directory is writable and ignored by Git;
 project specifications and progress documents remain in `docs/`.
+
+Normal exit and stopping release the lock. A crash or forced kill can leave it
+behind; startup then refuses to launch. See [lock recovery](supplemental/reference.md#continuation-settings)
+before removing it. Never remove a lock while a worker may still be running.
 
 The enable file also allows configured session-end hooks to start a background
 loop after interactive work. Auto-continue is off until you create that file.

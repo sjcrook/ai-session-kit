@@ -9,10 +9,14 @@ cleanup() {
     "$TEST_ROOT/.ai-session/auto-continue.pid" "$TEST_ROOT/.github/auto-continue-enabled" \
     "$TEST_ROOT/.cline/.active-role" "$TEST_ROOT/notify.sh" \
     "$TEST_ROOT/calls" "$TEST_ROOT/notifications" "$TEST_ROOT/args" \
+    "$TEST_ROOT/release" \
     "$TEST_ROOT/command-exceptions/command-exceptions.conf" \
     "$TEST_ROOT/docs/functional-spec.md" "$TEST_ROOT/docs/technical-spec.md" \
     "$TEST_ROOT/docs/planning/functional-spec.md" "$TEST_ROOT/docs/planning/technical-spec.md" \
     "$TEST_ROOT/docs/planning/tasks.md" "$TEST_ROOT/docs/planning/review.md"
+  if [[ -d "$TEST_ROOT/.ai-session/auto-continue.lock" ]]; then
+    rmdir "$TEST_ROOT/.ai-session/auto-continue.lock"
+  fi
   rmdir "$TEST_ROOT/docs/planning"
   rmdir "$TEST_ROOT/bin" "$TEST_ROOT/docs" "$TEST_ROOT/.ai-session" "$TEST_ROOT/.github" "$TEST_ROOT/.cline" "$TEST_ROOT/tmp" "$TEST_ROOT/command-exceptions" "$TEST_ROOT"
 }
@@ -27,7 +31,12 @@ cat >"$TEST_ROOT/bin/cline" <<'MOCK'
 #!/usr/bin/env bash
 for guidance in 'including temporary cleanup and test setup' \
   'Never retry or disguise a denied operation' 'Cancellation is not completion' \
-  'check-planning.sh' 'Never select Superseded work'; do
+  'check-planning.sh' 'Never select Superseded work' \
+  'never shell writes (including printf/echo redirection, heredocs, or interpreter-based writes)' \
+  'If file-editing tools are unavailable' \
+  'For regression-only tasks covering existing behavior, a correct test may pass immediately' \
+  'Never manufacture a failure by using incorrect expectations or temporarily breaking working code' \
+  'For new or changed behavior, confirm it fails because the required behavior is missing'; do
   if [[ "$*" != *"$guidance"* ]]; then
     echo "Missing continuation prompt guidance: $guidance" >&2
     exit 99
@@ -36,6 +45,14 @@ done
 printf '%s\n' "$@" >>args
 echo call >>calls
 case "$MOCK_MODE" in
+  hold)
+    for ((i = 0; i < 200; i++)); do
+      [[ ! -e release ]] || break
+      sleep 0.05
+    done
+    [[ -e release ]] || exit 98
+    printf '| S01 | T001 | Example | Done |\n' >docs/tasks.md
+    ;;
   abort) printf '\033[2m[abort] aborted by another client\033[0m\n'; exit 0 ;;
   plain-abort) echo '[abort] aborted' >&2; exit 0 ;;
   timeout) echo '[abort] aborted after timeout'; exit 1 ;;
@@ -111,6 +128,7 @@ run_case() {
   [[ "$(wc -l <"$TEST_ROOT/calls" | tr -d ' ')" == "$expected_calls" ]]
   grep -F "$expected_log" "$TEST_ROOT/.ai-session/auto-continue.log" >/dev/null
   [[ ! -f "$TEST_ROOT/.ai-session/auto-continue.pid" ]]
+  [[ ! -d "$TEST_ROOT/.ai-session/auto-continue.lock" ]]
   if [[ "$mode" == abort || "$mode" == plain-abort || "$mode" == timeout ]]; then
     grep -F 'Auto-continue CLI aborted' "$TEST_ROOT/notifications" >/dev/null
     ! grep -F 'Auto-continue made no progress' "$TEST_ROOT/notifications" >/dev/null
@@ -185,3 +203,94 @@ for cli in cline copilot; do
   grep -F 'Planning approval required' "$TEST_ROOT/notifications" >/dev/null
 done
 echo 'PASS: pending planning review prevents either CLI from launching'
+
+printf '| S01 | T001 | Example | Todo |\n' >"$TEST_ROOT/docs/tasks.md"
+cp "$TEST_ROOT/docs/tasks.md" "$TEST_ROOT/docs/planning/tasks.md"
+printf 'Status: Approved\n' >"$TEST_ROOT/docs/planning/review.md"
+: >"$TEST_ROOT/calls"
+: >"$TEST_ROOT/.ai-session/auto-continue.log"
+workers=()
+for ((i = 0; i < 12; i++)); do
+  (
+    cd "$TEST_ROOT"
+    PATH="$TEST_ROOT/bin:$PATH" TMPDIR="$TEST_ROOT/tmp" AUTO_CONTINUE_CLI=cline \
+      MOCK_MODE=hold bash "$SCRIPT_DIR/auto-continue.sh"
+  ) &
+  workers+=("$!")
+done
+for ((i = 0; i < 100; i++)); do
+  [[ ! -s "$TEST_ROOT/calls" ]] || break
+  sleep 0.05
+done
+sleep 0.5
+concurrent_calls="$(wc -l <"$TEST_ROOT/calls" | tr -d ' ')"
+lock_held=false
+[[ ! -d "$TEST_ROOT/.ai-session/auto-continue.lock" ]] || lock_held=true
+touch "$TEST_ROOT/release"
+for worker in "${workers[@]}"; do
+  wait "$worker" || [[ "$?" == 1 ]]
+done
+[[ "$lock_held" == true ]]
+[[ "$concurrent_calls" == 1 ]]
+[[ "$(wc -l <"$TEST_ROOT/calls" | tr -d ' ')" == 1 ]]
+[[ ! -e "$TEST_ROOT/.ai-session/auto-continue.pid" ]]
+[[ ! -e "$TEST_ROOT/.ai-session/auto-continue.lock" ]]
+echo 'PASS: twelve simultaneous starts launch exactly one CLI and release runtime ownership'
+
+mkdir "$TEST_ROOT/.ai-session/auto-continue.lock"
+: >"$TEST_ROOT/calls"
+status=0
+(
+  cd "$TEST_ROOT"
+  PATH="$TEST_ROOT/bin:$PATH" AUTO_CONTINUE_CLI=cline \
+    MOCK_MODE=success bash "$SCRIPT_DIR/auto-continue.sh"
+) || status=$?
+[[ "$status" == 1 ]]
+[[ ! -s "$TEST_ROOT/calls" ]]
+grep -F 'lock exists without a live recorded worker' "$TEST_ROOT/.ai-session/auto-continue.log" >/dev/null
+rmdir "$TEST_ROOT/.ai-session/auto-continue.lock"
+run_case cline success 0 1 'no unfinished tasks remain'
+echo 'PASS: an abandoned lock fails explicitly and a recovered worker can restart'
+
+rm "$TEST_ROOT/release"
+printf '| S01 | T001 | Example | Todo |\n' >"$TEST_ROOT/docs/tasks.md"
+cp "$TEST_ROOT/docs/tasks.md" "$TEST_ROOT/docs/planning/tasks.md"
+: >"$TEST_ROOT/calls"
+(
+  cd "$TEST_ROOT"
+  PATH="$TEST_ROOT/bin:$PATH" TMPDIR="$TEST_ROOT/tmp" AUTO_CONTINUE_CLI=cline \
+    MOCK_MODE=hold bash "$SCRIPT_DIR/auto-continue.sh"
+) &
+worker=$!
+for ((i = 0; i < 100; i++)); do
+  [[ ! -s "$TEST_ROOT/calls" ]] || break
+  sleep 0.05
+done
+[[ -s "$TEST_ROOT/calls" ]]
+(
+  cd "$TEST_ROOT"
+  bash "$SCRIPT_DIR/stop-auto-continue.sh"
+)
+wait "$worker" 2>/dev/null || true
+[[ ! -e "$TEST_ROOT/.ai-session/auto-continue.pid" ]]
+[[ ! -e "$TEST_ROOT/.ai-session/auto-continue.lock" ]]
+run_case cline success 0 1 'no unfinished tasks remain'
+echo 'PASS: stopping a real runner releases its lock and permits restart'
+
+printf '%s\n' "$$" >"$TEST_ROOT/.ai-session/auto-continue.pid"
+: >"$TEST_ROOT/calls"
+(
+  cd "$TEST_ROOT"
+  PATH="$TEST_ROOT/bin:$PATH" AUTO_CONTINUE_CLI=cline \
+    MOCK_MODE=success bash "$SCRIPT_DIR/auto-continue.sh"
+)
+[[ ! -s "$TEST_ROOT/calls" ]]
+[[ "$(cat "$TEST_ROOT/.ai-session/auto-continue.pid")" == "$$" ]]
+[[ ! -e "$TEST_ROOT/.ai-session/auto-continue.lock" ]]
+rm "$TEST_ROOT/.ai-session/auto-continue.pid"
+sleep 0.01 &
+old_pid=$!
+wait "$old_pid"
+printf '%s\n' "$old_pid" >"$TEST_ROOT/.ai-session/auto-continue.pid"
+run_case cline success 0 1 'no unfinished tasks remain'
+echo 'PASS: legacy live PID ownership is preserved and a stale legacy PID is recovered'

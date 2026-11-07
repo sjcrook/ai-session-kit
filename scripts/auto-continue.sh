@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/lib/planning-core.sh"
 TASKS_FILE="docs/tasks.md"
 LOG_FILE=".ai-session/auto-continue.log"
 PID_FILE=".ai-session/auto-continue.pid"
+LOCK_DIR=".ai-session/auto-continue.lock"
 # Default of 10 is deliberately generous enough to clear a typical small
 # sprint backlog (e.g. 5 simple tasks) in a single run without needing to be
 # manually re-triggered, while still bounded (not unlimited) as a safety
@@ -35,29 +36,55 @@ if ! touch "$LOG_FILE"; then
 fi
 echo "Auto-continue log: $LOG_FILE"
 
-# Concurrent-loop guard: if a previous auto-continue.sh is still running (its
-# PID file points at a live process), don't start a second one — two loops
-# racing on the same docs/tasks.md could both grab the same "next" task and
-# step on each other's edits. A leftover PID file from a crashed/killed
-# previous run (process no longer alive) is safe to clear and proceed past.
+# mkdir is atomic across simultaneous lifecycle hooks, unlike checking and
+# writing the PID file. Keep the lock until cleanup has finished.
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  if [[ -d "$LOCK_DIR" ]]; then
+    existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ "$existing_pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
+      log "auto-continue: stopping — another instance is already running (pid $existing_pid)"
+      exit 0
+    fi
+    log "auto-continue: stopping — lock exists without a live recorded worker; startup may still be in progress or the lock may be abandoned. Verify no worker is running before removing $LOCK_DIR with rmdir and retrying."
+  else
+    log "auto-continue: stopping — cannot create runtime lock $LOCK_DIR"
+  fi
+  exit 1
+fi
+
+CLI_OUTPUT=""
+OWNS_PID=false
+cleanup() {
+  if [[ "$OWNS_PID" == true ]]; then
+    rm -f "$PID_FILE" || log "auto-continue: could not remove owned PID file $PID_FILE"
+  fi
+  if [[ -n "$CLI_OUTPUT" ]]; then
+    rm -f "$CLI_OUTPUT" || log "auto-continue: could not remove temporary CLI output $CLI_OUTPUT"
+  fi
+  rmdir "$LOCK_DIR" || log "auto-continue: could not release runtime lock $LOCK_DIR"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
+# Also honor workers started by older kit versions without a lock directory.
 if [[ -f "$PID_FILE" ]]; then
   existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+  if [[ "$existing_pid" =~ ^[1-9][0-9]*$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
     log "auto-continue: stopping — another instance is already running (pid $existing_pid)"
     exit 0
   fi
-  rm -f "$PID_FILE"
+  if ! rm -f "$PID_FILE"; then
+    log "auto-continue: stopping — cannot remove stale PID file $PID_FILE"
+    exit 1
+  fi
 fi
 
-echo "$$" >"$PID_FILE"
-CLI_OUTPUT=""
-cleanup() {
-  rm -f "$PID_FILE"
-  if [[ -n "$CLI_OUTPUT" ]]; then
-    rm -f "$CLI_OUTPUT"
-  fi
-}
-trap cleanup EXIT
+if ! echo "$$" >"$PID_FILE"; then
+  log "auto-continue: stopping — cannot write PID file $PID_FILE"
+  exit 1
+fi
+OWNS_PID=true
 
 CLI="${AUTO_CONTINUE_CLI:-}"
 if [[ -z "$CLI" && -f "$AUTO_CONTINUE_FLAG" ]]; then
@@ -82,7 +109,7 @@ if [[ "$CLI" == "cline" ]]; then
   fi
 fi
 
-PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Use file-editing tools to create or edit source and tests, not shell heredocs: the command guard scans the entire shell payload, including file content. Do not bypass a denied command. Write a failing test first, then the minimal implementation, then set its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
+PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Use file-editing tools to create or edit source and tests, never shell writes (including printf/echo redirection, heredocs, or interpreter-based writes). This applies even when the content contains no denied command. If file-editing tools are unavailable, report the limitation and mark the task Blocked. Do not bypass a denied command. Write an acceptance test first. For new or changed behavior, confirm it fails because the required behavior is missing, then write the minimal implementation. For regression-only tasks covering existing behavior, a correct test may pass immediately; preserve the working implementation and record that no implementation change or red phase was needed. Never manufacture a failure by using incorrect expectations or temporarily breaking working code. Run the tests before setting its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
 PROMPT+=" The git push, rm -rf, and sudo deny-list applies to direct commands too, including temporary cleanup and test setup, unless the operator grants the corresponding named exception in command-exceptions/command-exceptions.conf. Never create, edit, or redirect that operator policy or its enforcement files. Using an operator-granted exception is permitted. An unapproved match anywhere in a batch rejects the entire tool call and may end the Cline task. Prefer established test fixtures; plan cleanup of session-created artifacts using explicitly identified individual files and then empty directories. Never retry or disguise a denied operation with alternate spellings, interpreters, or wrappers. When resuming after a denial, check .ai-session/auto-continue.log (or hook stderr if logging was unavailable) and verify real state; do not assume any rejected batch ran. After the operator changes permission, reassess only the affected blocker and rerun necessary validation. Cancellation is not completion; report a necessary operation with no permitted workflow as a blocker."
 PROMPT+=" Before selecting or changing any task, run bash external/ai-session-kit/scripts/check-planning.sh. If approval is missing or stale, stop and request /tasks and explicit approval; never approve or edit docs/planning/ yourself. Never select Superseded work."
 

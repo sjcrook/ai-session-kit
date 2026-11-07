@@ -449,9 +449,10 @@ Overrides for direct/manual launches:
 | `AUTO_CONTINUE_CLI` | Select `copilot` or `cline` | Enable-file contents, then auto-detection |
 | `AUTO_CONTINUE_MAX_ITERATIONS` | Maximum headless invocations per loop | `10` |
 
-Setting `AUTO_CONTINUE_CLI` in a terminal affects scripts launched from that
-terminal. It does not necessarily affect runs started automatically by VS Code
-when an AI session ends, because VS Code may not have that terminal's settings.
+Setting these variables in a terminal affects scripts launched directly from
+that terminal. Do not assume they reach VS Code or Cline lifecycle hooks:
+a live Cline CLI 3.0.73 check used the default limit even when its starter
+session was launched with `AUTO_CONTINUE_MAX_ITERATIONS=3`.
 For those automatic runs, choose the CLI by writing its name into
 `.github/auto-continue-enabled`. For example, run this from the application root
 to enable automatic continuation with Cline:
@@ -465,8 +466,26 @@ Use `copilot` instead of `cline` to select Copilot.
 Each invocation is prompted to implement one task, test-first, and update the
 handoff. Hooks do not write that handoff. The loop stops for task blockers,
 completion, CLI failure/abort, two consecutive unchanged-task-list comparisons,
-or the iteration cap. It prevents another loop from starting while its recorded
-PID is alive, but this is not coordination for independently launched clients.
+or the iteration cap. An atomic `.ai-session/auto-continue.lock` directory
+serializes runner startup and stays held until PID/output cleanup finishes.
+Cline versions may load both installed hook layouts; simultaneous callbacks
+must still produce only one worker. This does not coordinate independently
+launched chat or CLI clients.
+
+Normal exit and `stop-auto-continue.sh` release the lock. A crash or forced kill
+may leave it behind. A lock with no live recorded PID causes an explicit startup
+failure, not automatic lock removal: another worker may still be publishing its
+PID. Disable hook launching first, verify that no auto-continue worker or its CLI
+descendants are running, then remove only the empty lock directory:
+
+```bash
+rmdir .ai-session/auto-continue.lock
+```
+
+If it is not empty, inspect it rather than deleting recursively. Do not remove
+a lock based solely on a missing/stale PID file, or while startup is in progress.
+A stale PID file without a lock is still handled automatically for compatibility
+with older runners.
 
 ### Session-end hooks and notifications
 

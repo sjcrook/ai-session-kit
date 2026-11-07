@@ -93,6 +93,19 @@ for path in AGENTS.md .github/prompts/implement.prompt.md \
 done
 echo 'PASS: both integrations install shared spec preservation, change planning, explicit approval, and implementation checks'
 
+for path in AGENTS.md .github/prompts/implement.prompt.md \
+  .github/agents/implementer.agent.md .cline/skills/implementer/SKILL.md; do
+  cmp "$project/$path" "$KIT_ROOT/template/project/$path"
+  for constraint in \
+    'For regression-only tasks covering existing behavior, a correct test may pass immediately' \
+    'Never manufacture a failure by using incorrect expectations or temporarily breaking working code' \
+    'never shell writes (including printf/echo redirection, heredocs, or interpreter-based writes)' \
+    'required behavior is missing'; do
+    grep -F "$constraint" "$project/$path" >/dev/null
+  done
+done
+echo 'PASS: implementation workflows preserve honest regression evidence and require file-editing tools'
+
 for constraint in 'General conversation is the default.' \
   'Do not automatically read project documents, select tasks, change task statuses, or write a handoff for a general question.' \
   'A previous workflow command does not make later unrelated questions workflow requests.' \
