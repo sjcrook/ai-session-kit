@@ -546,9 +546,12 @@ Blocker detection scans task rows, not free text in the handoff.
 
 ## Integration details
 
-Cline CLI reads `.cline/hooks/<Name>.sh`; the extension reads
-`.clinerules/hooks/<Name>` without an extension. Both layouts are installed.
-Enable hooks in the extension's settings; CLI discovery is automatic.
+Both `.cline/hooks/<Name>.sh` and `.clinerules/hooks/<Name>` are installed for
+client compatibility. Do not assume a client reads only one layout: live Cline
+CLI 3.0.73 discovered and executed both, producing duplicate callbacks. The
+runner's atomic lock prevents those callbacks from starting competing workers.
+Enable hooks in the extension's settings and verify discovery in the installed
+client; CLI discovery was automatic in the tested version.
 
 Cline skills select `planner`, `implementer`, or `handoff-writer` by writing
 `.cline/.active-role`. The tasks and handoff skills select the corresponding
@@ -600,6 +603,60 @@ The current [Cline SDK plugin API](https://docs.cline.bot/sdk/plugins) documents
 That is not this kit's shell-hook contract and does not establish compatibility
 with its supported CLI/extension installations. No migration to that API is
 implemented; returning `cancel: false` for an unapproved operation is not recovery.
+
+## Verified workflow checks
+
+Live checks were completed on 2026-11-06 and 2026-11-07 using disposable
+Node.js sum-CLI projects, including `ai-session-kit-test-2` mounted at `/workspace`
+in a restricted Dev Container. The final Cline stop/resume check used released
+kit commit `8925981` and Cline CLI 3.0.73. These are observed results for the
+tested clients and environment, not certification of every version or project.
+
+| Check | Observed result |
+|---|---|
+| Initial and change planning | Copilot with explicitly selected planner and Cline prepared reviewed proposals without implementing them. |
+| Approval and reconciliation | Pending plans blocked execution; explicit approval advanced verified snapshots. Repeated change planning preserved task history without duplicate follow-ups. |
+| Copilot direct continuation | Three successive tasks completed; independently verified 17 passing tests and normal worker cleanup. |
+| Copilot Chat session-end launch | A handoff session automatically launched a worker that completed approved T004; 18 tests passed. This verifies Chat launching, not every Copilot CLI lifecycle hook. |
+| Copilot live stop/resume | Stopped a worker with T005 In Progress, verified process-tree termination, then resumed that task; 19 tests passed. |
+| Cline live planner enforcement | Planner shell calls were rejected by the installed hooks. The CLI reported an abort despite exit status 0; guard diagnostics established the denial. |
+| Cline direct continuation | Runner reset the stale planner role to implementer, completed T006 and exited; 20 tests passed. |
+| Cline duplicate lifecycle callbacks | T007 exposed two simultaneous workers. After the atomic-lock fix, real T008 lifecycle launching produced exactly one worker and one CLI invocation; the duplicate was rejected. 22 tests passed and PID/lock cleanup was verified. |
+| Cline live stop/resume | Automatically launched T009, stopped after In Progress but before test writes, and verified all recorded worker/descendant PIDs exited. Source/test/README hashes and the 22-test baseline were unchanged. A fresh bounded worker resumed the same task without resetting history; 23 tests passed. |
+| Offline runner regressions | All seven kit suites passed on macOS. Linux checks covered simultaneous startup, abandoned locks, legacy PID compatibility, process-tree stopping and restart. Twelve simultaneous starts launched exactly one CLI. |
+
+Final independent checks found current planning approval, no remaining worker
+or continuation CLI, and no PID file or lock directory. Automatic launching was disabled
+after testing. The fixture's kit submodule was clean at the released commit.
+
+### Remaining limitations
+
+- **Copilot command routing:** automatic bare `/tasks` routing was unreliable.
+  Explicit planner selection was verified; reading a role file alone does not
+  enforce its tool permissions. Best-effort command mapping is not a dispatcher.
+- **Instruction following:** T006 used a shell write for test code and a
+  deliberately wrong expectation to manufacture a red phase. The final test
+  passed, but that was not a clean workflow pass. Revised guidance requires
+  editing tools and honest regression-only results; T007-T009 followed it in
+  the observed runs. Instructions still do not guarantee compliance.
+- **Hook environment:** Cline hook-launched workers used the default 10-session
+  cap despite a three-session override on the starter invocation. Do not assume
+  terminal environment overrides reach lifecycle hooks.
+- **Approval and isolation:** agent-writable planning snapshots are consistency
+  guards, not a security boundary. Container restrictions do not protect the
+  writable workspace from deletion; keep independent backups.
+- **Coverage boundaries:** stop/resume was tested before new test contents were
+  saved, not at every possible interruption point. Crash/forced-kill lock
+  recovery was covered by offline abandoned-lock tests, not a live client crash.
+  Real notification delivery, all extension/CLI versions, larger projects and
+  independently launched competing clients were not validated by these checks.
+- **Fixture provenance:** files accidentally deleted during container recreation
+  were recovered from saved evidence before later checks. T005's final assertions
+  were reconstructed from approved acceptance criteria where the excerpt was
+  incomplete, then independently tested.
+
+Use these results as a baseline for a supervised pilot on a real project.
+Review actual changes, tests and saved state before enabling unattended work.
 
 ## Maintainer reference
 

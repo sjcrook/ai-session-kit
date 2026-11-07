@@ -562,6 +562,7 @@ have run. Do not infer completion from an exit code of zero or a hook displaying
 
 ## Further reference
 
+- [Verified live workflow checks and remaining limitations](supplemental/reference.md#verified-workflow-checks)
 - [Container protection and mount setup](supplemental/reference.md#protecting-the-container)
 - [Command policy](supplemental/reference.md#command-policy)
 - [Cline and Copilot policy differences](supplemental/reference.md#backend-differences)
