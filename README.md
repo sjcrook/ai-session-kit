@@ -140,6 +140,11 @@ unreliable. The same right-hand Chat panel can dispatch requests differently:
 typing a slash command alone does not prove its workspace prompt or custom
 agent was selected.
 
+**Do not rely on the generic Agent to switch roles for `/tasks`, `/implement`,
+or `/handoff`.** Select `planner`, `implementer`, or `handoff-writer`,
+respectively, then invoke the workspace prompt from suggestions. The generic
+Agent remains appropriate for the specification steps shown below.
+
 | Step | Select in agent picker | Enter in chat | Result |
 |---|---|---|---|
 | 1. Describe the project | Agent | `/functional-spec` | Functional specification |
