@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stops a running auto-continue loop and its current CLI child.
+# Stops a running auto-continue loop and its CLI process tree.
 # Vendored, read-only — assumes invocation cwd is the project root.
 set -uo pipefail
 
@@ -28,17 +28,42 @@ if [[ "$process_command" != *"auto-continue.sh"* ]]; then
   exit 1
 fi
 
-if ! command -v pkill >/dev/null 2>&1; then
-  echo "pkill is required to stop the active CLI child." >&2
+# Freeze the loop so it cannot start another iteration while children stop.
+if ! kill -STOP "$pid"; then
+  echo "Failed to pause auto-continue process $pid." >&2
   exit 1
 fi
+trap 'kill -CONT "$pid" 2>/dev/null || true' EXIT
 
-child_status=0
-pkill -TERM -P "$pid" || child_status=$?
-if [[ "$child_status" -gt 1 ]]; then
-  echo "Failed to signal the active CLI child of auto-continue process $pid (pkill exit $child_status)." >&2
+if ! process_tree="$(ps -e -o pid= -o ppid=)"; then
+  echo "Failed to inspect descendants of auto-continue process $pid." >&2
   exit 1
 fi
+descendants="$(printf '%s\n' "$process_tree" | awk -v root="$pid" '
+  { children[$2] = children[$2] " " $1 }
+  function visit(parent, ids, count, i) {
+    count = split(children[parent], ids, " ")
+    for (i = 1; i <= count; i++) {
+      if (ids[i] != "") {
+        visit(ids[i])
+        print ids[i], parent
+      }
+    }
+  }
+  END { visit(root) }
+')"
+
+while read -r child parent; do
+  [[ -n "$child" ]] || continue
+  # Recheck ancestry before signaling a PID from the snapshot.
+  actual_parent="$(ps -p "$child" -o ppid= 2>/dev/null || true)"
+  actual_parent="${actual_parent//[[:space:]]/}"
+  [[ "$actual_parent" == "$parent" ]] || continue
+  if ! kill -TERM "$child" 2>/dev/null && kill -0 "$child" 2>/dev/null; then
+    echo "Failed to signal CLI descendant $child of auto-continue process $pid." >&2
+    exit 1
+  fi
+done <<<"$descendants"
 
 if ! kill -TERM "$pid"; then
   if kill -0 "$pid" 2>/dev/null; then
@@ -49,8 +74,8 @@ if ! kill -TERM "$pid"; then
   exit 0
 fi
 
-if [[ "$child_status" -eq 0 ]]; then
-  echo "Sent TERM to auto-continue process $pid and its current CLI child."
+if [[ -n "$descendants" ]]; then
+  echo "Sent TERM to auto-continue process $pid and its CLI descendants."
 else
   echo "Sent TERM to auto-continue process $pid; it had no current CLI child."
 fi

@@ -289,7 +289,7 @@ Open a container terminal and check the CLI you installed:
 
 | Tool | Installation check | Sign-in |
 |---|---|---|
-| Cline | `cline --version` | Run `cline` and follow its provider/authentication setup. |
+| Cline | `cline --version` | Run `cline auth` and follow its provider/model setup; check installed-version help if this command differs. |
 | Copilot | `copilot --version` | Run `copilot`, then use `/login` if prompted. |
 
 Copilot CLI requires Copilot access, and organization policy may restrict its
@@ -299,6 +299,64 @@ If you omitted automatic installation, you can run the approved command manually
 inside the container. Also add it through the generator for future container
 creation. Change settings through the generator's supported workflow; do not
 hand-edit generated configuration.
+
+### Trust and permissions checklist
+
+These are independent checks; completing one does not complete the others.
+
+| Check | Setup and verification |
+|---|---|
+| VS Code workspace trust | In the Dev Container window, open the actual project and run **Workspaces: Manage Workspace Trust**. Review it before trusting; do not globally disable trust checks. |
+| Copilot CLI authentication | As the worker's container user, run `copilot` and complete sign-in if needed. VS Code extension sign-in alone is insufficient. |
+| Copilot CLI folder trust | Trust and remember the actual container path; see the instructions below. Check that CLI output does not report skipped repository hooks. |
+| Cline CLI authentication | Run `cline auth` from the container project and configure the provider/model. Use `cline --help`, `cline config`, or `cline doctor` to diagnose setup, without sharing credentials. |
+| Cline tool permissions and hooks | The kit uses `--auto-approve true` for unattended CLI calls. This grants tool approval, not folder trust or a sandbox. Verify the installed CLI invokes the kit's `.cline/hooks` and that a harmless guard-input probe is rejected. The VS Code Cline extension separately requires **Enable Hooks**. |
+| Independent enforcement | Verify read-only mounts, absence of writable aliases, and current planning approval using the container verification checklist. |
+
+The current [Cline CLI documentation](https://docs.cline.bot/usage/cli-overview)
+does not describe a Copilot-style remembered-folder trust setup. Do not invent
+a `trustedFolders` setting for Cline or assume Copilot trust applies to it.
+Follow any additional prompts or requirements shown by the installed version.
+CLI configuration and authentication may need restoration when a container is
+recreated; the container generator does not automatically confer project trust.
+
+### Copilot CLI folder trust
+
+CLI sign-in and folder trust are separate from VS Code authentication and
+workspace trust. Establish both as the same container user that runs
+auto-continue, from the actual container project root (for example `/workspace`).
+Run `copilot` interactively, review the repository configuration, and select
+the option to trust and remember the folder when prompted. This permits loading
+repository configuration; it does not remove the kit's command deny rules or
+read-only mounts.
+
+In Copilot CLI 1.0.107, remembered folders are stored in `trustedFolders` in
+`~/.copilot/config.json` (or the configured Copilot home), not `settings.json`.
+`copilot config trustedFolders` cannot read or change that value. Preserve
+existing settings; do not replace the configuration with a trust-only file.
+Re-establish trust after recreating a container if its CLI user state was lost.
+
+An interactive launch may show the signed-in session without offering a trust
+prompt. That alone does not prove remembered trust. In this version, if no prompt
+is offered, the operator can add the reviewed absolute project path to the
+`trustedFolders` array in the CLI user's `config.json`, preserving every other
+setting and existing trusted folder. The file can contain comments; do not feed
+it to a strict JSON parser or replace it with a new minimal file. Verify the
+saved entry, then start a new CLI session. Do not store CLI user configuration
+or credentials in the project or commit them.
+
+For a supervised, single prompt-mode invocation, this version also supports
+`copilot --trust-folder -p "<prompt>"`. That trusts only the resolved working
+directory for that invocation, without saving trust or granting tool/path/URL
+permissions. It does not establish trust for later sessions launched by the
+kit. Prefer remembered folder trust for ordinary unattended use rather than a
+temporary shell wrapper.
+
+Check the actual runtime output. A warning that repository hooks were skipped
+because the folder is not trusted means hook behavior has not been validated.
+Stop the worker, establish trust, and restart. Do not use `--allow-all` or
+`COPILOT_ALLOW_ALL=true` simply to suppress this warning: those also approve
+additional permissions.
 
 ## Command policy
 
@@ -432,8 +490,11 @@ Copilot Chat's `Stop` hook calls the kit's `check-handoff.sh`. Cline's
 
 Cancellation can therefore trigger a continuation attempt while enabled.
 Disable the enable file before stopping workers or intervening manually.
-Copilot CLI does not run the VS Code Chat Stop hook; the continuation loop drives
-its successive invocations directly.
+The continuation loop drives successive Copilot CLI invocations directly;
+it does not depend on the VS Code Chat Stop hook. CLI repository-hook support
+depends on the installed version and folder trust. Do not infer that the Chat
+hook ran merely because the CLI found `.github/hooks`; verify the actual
+session-end launch in the client you use.
 
 The application's `notify.sh` receives a subject and message. Its default stub
 only logs; configure a real provider for unattended alerts. Store secrets outside
@@ -527,7 +588,7 @@ implemented; returning `cancel: false` for an unapproved operation is not recove
 |---|---|
 | `scripts/cline-tool-guard.sh` | Cline role and command checks |
 | `scripts/auto-continue.sh` | Headless continuation and CLI invocation |
-| `scripts/stop-auto-continue.sh` | Stops the recorded loop and CLI child |
+| `scripts/stop-auto-continue.sh` | Pauses the recorded loop and signals its CLI descendants by PID before stopping the loop |
 | `scripts/check-handoff*.sh` | Session-end entry points |
 | `scripts/lib/handoff-core.sh` | Shared blocker/notification/launch logic |
 | `scripts/lib/command-policy.sh` | Shared operator policy reader |

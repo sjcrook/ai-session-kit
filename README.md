@@ -324,9 +324,37 @@ The default limit is **10 sessions**, normally one task attempt per session.
 
 ### Prepare the environment
 
+Complete these separate checks in the Dev Container before enabling automation:
+
+1. **VS Code workspace trust:** open the correct container project, run
+   **Workspaces: Manage Workspace Trust**, and trust it only after reviewing
+   its contents. Do not disable Restricted Mode globally.
+2. **CLI authentication:** install and sign in to the CLI inside the container,
+   as the user that will run the worker. Extension sign-in is not proof of CLI
+   sign-in.
+3. **CLI trust and permissions:** Copilot needs remembered folder trust for
+   the container project path. Cline needs provider setup and functioning kit
+   hooks; its documented setup does not specify an equivalent remembered-folder
+   trust list. Auto-approval is permission to run tools, not workspace trust.
+4. **Enforcement and planning:** verify protected mounts and active hooks,
+   then run `bash external/ai-session-kit/scripts/check-planning.sh`. It must
+   pass before implementation.
+
+See the [trust and permissions checklist](supplemental/reference.md#trust-and-permissions-checklist)
+for setup commands and version-specific details.
+
 Inside the container, install and authenticate **Copilot CLI (`copilot`) or Cline
 CLI (`cline`)**. Installing only the VS Code extension is not enough. Confirm the
 selected command is available in the terminal where automation will run.
+
+For Copilot, also establish CLI folder trust for the project's **container path**.
+VS Code workspace trust does not establish Copilot CLI trust. From the project
+root, run `copilot` interactively and, after reviewing the repository's
+configuration and hooks, choose to trust and remember this folder when prompted.
+Remembered trust is needed for later hook-launched workers, which do not have an
+interactive terminal. See [CLI folder trust](supplemental/reference.md#copilot-cli-folder-trust).
+Do not use `--allow-all` or `COPILOT_ALLOW_ALL=true` merely to establish trust:
+they grant additional permissions.
 
 [dev-container-config](https://github.com/sjcrook/dev-container-config) can generate
 the container configuration. Use its generator rather than hand-editing generated
@@ -380,7 +408,7 @@ selection overrides and session-end behavior.
 ### Stop automation
 
 First remove the enable file to prevent a session-end hook from launching another
-loop, then stop the recorded loop and its current CLI child:
+loop, then stop the recorded loop and its CLI descendants:
 
 ```bash
 rm -f .github/auto-continue-enabled
