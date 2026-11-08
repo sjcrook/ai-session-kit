@@ -53,7 +53,7 @@ Add the kit as a Git submodule: a dependency stored at a specific revision insid
 your project.
 
 ```bash
-git submodule add https://github.com/sjcrook/ai-session-kit.git external/ai-session-kit
+git submodule add <this-repo-url> external/ai-session-kit
 git submodule update --init --recursive
 external/ai-session-kit/template/create-scaffold-kit.sh
 ```
