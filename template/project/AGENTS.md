@@ -9,6 +9,12 @@
 - Specification and planning commands (`/functional-spec`, `/technical-spec`, `/tasks`, and the equivalent skills or planner role) prepare or revise project documents, not implementation. They may cover the full requested scope regardless of the handoff's "Next" list; the one-task/TDD execution rules and 1-3-task session limits below apply only to implementation sessions.
 - Planning must not implement code or mark tasks Done. Follow the active role's file-editing restrictions; request a separate handoff update if planning makes the current handoff stale.
 
+## Cline Role Lifecycle
+- In Cline, before any shell command, including orientation, use a native file-editing tool to select the requested workflow's role in `.cline/.active-role` (create the directory if needed): `planner` for task planning, `handoff-writer` for handoff/recovery/resume-preparation, `implementer` for implementation, or `none` otherwise. Never use a shell command to select or repair a role. This runtime marker is an exception to general conversation's no-workflow-bookkeeping rule.
+- Do not clear the role merely because a task is resumed. Retain or reselect that task's intended role before proceeding. After a crash or forced termination, a new request must select its own role rather than trust the saved marker; selecting `none` is not a way to bypass an active workflow's restrictions.
+- When finishing or stopping a workflow, use the file-editing tool to write `none` as the final file operation, including when stopping for an unmet precondition. This marker update is allowed in addition to the workflow's document-edit scope. Do not select `implementer` or restore a previous role, and do not run shell commands after cleanup as part of the finished workflow. If the marker cannot be updated, report the failure.
+- Cline's completion/cancellation/shutdown hooks also reset an existing marker to `none` before checking continuation. Hooks may not run after a crash or forced termination; explicit role selection is still required. Use only one active Cline task/worker per workspace: this marker is shared, not session-local.
+
 ## Literal Slash Commands
 This section is best-effort guidance, not a command dispatcher. In Copilot, explicitly select `planner` for `/tasks`, `implementer` for `/implement`, and `handoff-writer` for `/handoff`, `/recover-handoff`, or `/prepare-resume`. Automatic prompt/agent routing is not reliable in every chat interface; reading this mapping does not select a custom agent or enforce its tool restrictions.
 

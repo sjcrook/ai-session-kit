@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cline lifecycle hook entry point: reads and discards the hook's JSON payload
-# from stdin, runs the same blocker/auto-continue check as check-handoff.sh
-# (Copilot's Stop hook) via the shared lib/handoff-core.sh, and emits Cline's
+# from stdin, clears the finished task's role, runs the same blocker/auto-continue
+# check as check-handoff.sh (Copilot's Stop hook) via lib/handoff-core.sh, and emits Cline's
 # required {"cancel": false} hook-output contract.
 #
 # Installed under BOTH .cline/hooks/<Name>.sh (discovered by the Cline CLI) and
@@ -27,6 +27,16 @@
 # launched from, matching the same assumption check-handoff.sh already makes.
 set -uo pipefail
 cat >/dev/null # discard the hook JSON payload; none of its fields are needed here
+
+# Release the role before the check can launch a new implementation session.
+ROLE_FILE=".cline/.active-role"
+if [[ -e "$ROLE_FILE" || -L "$ROLE_FILE" ]]; then
+  if ! printf '%s' none >"$ROLE_FILE"; then
+    printf '%s\n' "Cannot reset $ROLE_FILE; auto-continue was not checked. Correct the role marker before starting another task." >&2
+    echo '{"cancel": false}'
+    exit 1
+  fi
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/handoff-core.sh

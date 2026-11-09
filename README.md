@@ -247,6 +247,13 @@ With hooks enabled, a shell attempt is rejected and may cancel the task;
 the diagnostic is recorded in `.ai-session/auto-continue.log`.
 The implementer, not the planner, runs `check-planning.sh`.
 
+Cline roles are temporary: skills finish by setting `.cline/.active-role` to
+`none`, and completion/cancellation/shutdown hooks also clear the marker before
+checking continuation. This does not disable command-policy checks. After a
+crash, the next request must select its intended role with file tools before
+running any shell command. Do not clear the role to bypass an active restricted
+workflow, or run concurrent Cline tasks/workers in one workspace.
+
 **Before ending an implementation session, request the handoff.** Stopping a session
 does not automatically write it, and running the implementer skill again in the
 same conversation doesn't either — only request it before leaving the
@@ -555,6 +562,7 @@ mount configuration or mount-source directories change. See
 | Symptom | First action |
 |---|---|
 | Cline stops before completing a task | Look for `cline-tool-guard: denied` in `.ai-session/auto-continue.log`; review permission before restarting. |
+| Every new Cline task reports `role=handoff-writer` or `role=planner` | Stop the old task/worker. Use a file editor to set `.cline/.active-role` to `none`, then invoke the intended skill so it selects its role before shell use. Update the kit and rerun the scaffold to install role-cleanup guidance. |
 | `[abort] aborted by another client` | Treat it as interruption, not success. The message alone does not prove a competing client exists. Check guard diagnostics first. |
 | No CLI found | Install/authenticate the CLI and check its availability inside the container, not just on the host. |
 | Automation will not proceed | Check all task rows for Blocked status. A blocker only in the handoff does not trigger task-based notification. |

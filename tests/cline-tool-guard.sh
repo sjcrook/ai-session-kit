@@ -75,6 +75,24 @@ for role in planner handoff-writer; do
 done
 echo 'PASS: role restrictions preserved'
 
+for state in missing empty none; do
+  case "$state" in
+    missing) rm .cline/.active-role ;;
+    empty) : >.cline/.active-role ;;
+    none) printf none >.cline/.active-role ;;
+  esac
+  for tool in run_commands execute_command; do
+    result="$(printf '{"toolName":"%s","command":"git status"}' "$tool" | bash "$SCRIPT_DIR/cline-tool-guard.sh")"
+    [[ "$result" == '{"cancel": false}' ]]
+    for command in 'rm -rf /example' 'git push origin main' 'sudo example'; do
+      result="$(printf '{"toolName":"%s","command":"%s"}' "$tool" "$command" | bash "$SCRIPT_DIR/cline-tool-guard.sh")"
+      [[ "$result" == *'"cancel": true'* ]]
+      [[ "$result" == *'Command matches a denied pattern:'* ]]
+    done
+  done
+done
+echo 'PASS: missing, empty, and neutral roles allow orientation without bypassing command policy'
+
 printf implementer >.cline/.active-role
 rm -f .ai-session/auto-continue.log
 rmdir .ai-session

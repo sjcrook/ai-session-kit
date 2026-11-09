@@ -61,6 +61,23 @@ for path in .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do
 done
 echo 'PASS: Cline planning skills install native-file-tool guidance for setup, inspection, and snapshots'
 
+for skill in planner tasks handoff handoff-writer recover-handoff prepare-resume implementer; do
+  path=".cline/skills/$skill/SKILL.md"
+  cmp "$project/$path" "$KIT_ROOT/template/project/$path"
+  grep -F '## Role cleanup' "$project/$path" >/dev/null
+  grep -F 'write the exact text `none`' "$project/$path" >/dev/null
+  grep -F 'Do not run shell commands after cleanup' "$project/$path" >/dev/null
+done
+grep -F 'before any shell command, including orientation' "$project/AGENTS.md" >/dev/null
+grep -F 'Do not clear the role merely because a task is resumed' "$project/AGENTS.md" >/dev/null
+for event in TaskComplete TaskCancel SessionShutdown; do
+  for path in ".cline/hooks/$event.sh" ".clinerules/hooks/$event"; do
+    cmp "$project/$path" "$KIT_ROOT/template/project/$path"
+    grep -F 'scripts/check-handoff-cline.sh' "$project/$path" >/dev/null
+  done
+done
+echo 'PASS: role cleanup, startup recovery, and both lifecycle hook layouts are installed'
+
 for path in .github/prompts/tasks.prompt.md .github/agents/planner.agent.md \
   .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do
   for constraint in 'planning.instructions.md' 'explicit developer approval' \

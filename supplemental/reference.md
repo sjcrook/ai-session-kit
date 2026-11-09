@@ -558,6 +558,21 @@ Cline skills select `planner`, `implementer`, or `handoff-writer` by writing
 roles. Planner and handoff-writer shell calls are rejected; implementer or no
 selected role may run commands subject to policy.
 
+Roles are temporary workflow state, not the next session's default. Workflows
+release their role by writing `none` with a file-editing tool as their final file
+operation, including when stopping for an unmet precondition. The Cline
+TaskComplete, TaskCancel, and SessionShutdown handler also resets an existing
+marker before checking blockers or launching continuation. A reset failure is
+reported on stderr and skips the continuation check. Auto-continue still selects
+`implementer` before launching its next Cline task.
+
+A crash or forced termination may skip cleanup hooks. Before any shell command,
+including orientation, a new request must select its intended role using file
+tools; a resumed restricted task retains or reselects its restricted role.
+Never reset on every tool call or use `none` to bypass a live restricted workflow.
+The marker is workspace-wide: do not run concurrent Cline tasks/workers in one
+workspace. The neutral `none` role still enforces command policy.
+
 Copilot custom agents restrict tool access, with shell access only for the
 implementer. Intended file scopes are instructions, not filesystem restrictions.
 
@@ -570,7 +585,7 @@ agent or Cline's recover-handoff skill. Unlike a normal handoff, it explicitly
 reconstructs progress from saved evidence without assuming conversation history
 or rerunning tests. It requires auto-continue to be disabled and workers stopped,
 reports inaccessible evidence, and changes only the handoff and supported task
-status cells (plus Cline's initial role marker). See the
+status cells (plus Cline's role selection and cleanup marker). See the
 [recovery instructions](../README.md#stop-automation). Rerun the scaffold from
 the host to install the new prompt and skill before reopening protected mounts.
 

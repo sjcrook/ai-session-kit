@@ -22,6 +22,9 @@
 # this file fresh on every tool call rather than any Cline conversation/task
 # state, so it is confirmed to work identically whether the call comes from a
 # resumed task, a brand-new task, the CLI, or the VS Code extension.
+# Workflows release the role to none when finished; terminal lifecycle hooks
+# also clear it before checking continuation. New requests select their role
+# with file tools before shell use, including after an unclean shutdown.
 #
 # Vendored, read-only — assumes invocation cwd is the project root (confirmed
 # empirically: Cline spawns hook subprocesses with cwd set to the workspace
@@ -34,7 +37,10 @@ source "$SCRIPT_DIR/lib/command-policy.sh"
 
 payload="$(cat)"
 tool_name="$(printf '%s' "$payload" | sed -n 's/.*"toolName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
-role="$(tr -d '[:space:]' <"$ROLE_FILE" 2>/dev/null || true)"
+role=""
+if [[ -e "$ROLE_FILE" || -L "$ROLE_FILE" ]]; then
+  role="$(tr -d '[:space:]' <"$ROLE_FILE" 2>/dev/null || true)"
+fi
 
 record_diagnostic() {
   local diagnostic="$(date -u +%FT%TZ) cline-tool-guard: $1 tool=$tool_name role=${role:-none}: $2"
