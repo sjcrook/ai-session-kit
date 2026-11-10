@@ -1,48 +1,60 @@
 #!/usr/bin/env bash
-# Cline lifecycle hook entry point: reads and discards the hook's JSON payload
-# from stdin, clears the finished task's role, runs the same blocker/auto-continue
-# check as check-handoff.sh (Copilot's Stop hook) via lib/handoff-core.sh, and emits Cline's
-# required {"cancel": false} hook-output contract.
-#
-# Installed under BOTH .cline/hooks/<Name>.sh (discovered by the Cline CLI) and
-# .clinerules/hooks/<Name> with no file extension (discovered by the Cline
-# VS Code extension) — confirmed empirically that each surface only reads
-# hooks from its own directory convention, not the other's.
-#
-# Registered for all three of TaskComplete, TaskCancel, and SessionShutdown
-# because which one fires depends on the surface and how the session ended:
-#   - Normal completion: TaskComplete fires on both the CLI and the extension.
-#   - VS Code extension "Cancel" button: TaskCancel fires; SessionShutdown does not.
-#   - Headless CLI killed by SIGINT (e.g. auto-continue.sh's loop being torn
-#     down): SessionShutdown fires; TaskCancel does not.
-# Registering all three guarantees this check still runs exactly once per
-# session end regardless of which surface or termination path was used, and
-# the underlying handoff_core_run logic is itself idempotent (re-reading
-# docs/tasks.md and .ai-session/auto-continue.pid-style state), so an edge case
-# where more than one of these fires for the same termination is harmless.
-#
-# Vendored, read-only — assumes invocation cwd is the project root. Confirmed
-# empirically that Cline spawns hook subprocesses with cwd set to the
-# workspace root regardless of where the `cline`/extension process itself was
-# launched from, matching the same assumption check-handoff.sh already makes.
+# Cline terminal hooks pass their event name explicitly in both hook layouts.
+# Payload identity is not assumed: only worker-inherited ownership is verified.
 set -uo pipefail
-cat >/dev/null # discard the hook JSON payload; none of its fields are needed here
+cat >/dev/null
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/workflow-runtime.sh"
+source "$SCRIPT_DIR/lib/handoff-core.sh"
+event="${1:-unknown}"
 
-# Release the role before the check can launch a new implementation session.
-ROLE_FILE=".cline/.active-role"
-if [[ -e "$ROLE_FILE" || -L "$ROLE_FILE" ]]; then
-  if ! printf '%s' none >"$ROLE_FILE"; then
-    printf '%s\n' "Cannot reset $ROLE_FILE; auto-continue was not checked. Correct the role marker before starting another task." >&2
-    echo '{"cancel": false}'
-    exit 1
-  fi
+finish() {
+  printf 'cline-workflow: %s\n' "$1" >&2
+  printf '{"cancel": false}\n'
+  exit "${2:-0}"
+}
+
+workflow_event lifecycle_received "event=$event" || finish "Cannot record lifecycle event; continuation was not checked." 1
+if ! workflow_owner_matches; then
+  workflow_event lifecycle_ignored "event=$event ownership=$WORKFLOW_OWNERSHIP; marker unchanged, no continuation" ||
+    finish "Cannot record lifecycle ownership mismatch." 1
+  finish "Lifecycle ownership mismatch or unreadable ownership: marker unchanged; no continuation. Use workflow-status.sh."
+fi
+workflow_event lifecycle_ownership "event=$event ownership=$WORKFLOW_OWNERSHIP; interactive session identity is unavailable; one active Cline workflow per workspace is required" ||
+  finish "Cannot record lifecycle ownership; no continuation." 1
+
+# A CLI may emit shutdown after completion. For verified worker iterations,
+# ignore that duplicate rather than pausing the next successful iteration.
+if [[ "$WORKFLOW_OWNERSHIP" == worker && -f .ai-session/cline-completed ]] &&
+  [[ "$(cat .ai-session/cline-completed)" == "$AI_SESSION_RUN_ID:$AI_SESSION_ITERATION" ]]; then
+  workflow_event lifecycle_ignored "event=$event; worker iteration already completed" ||
+    finish "Cannot record duplicate lifecycle event." 1
+  finish "Worker iteration already completed; duplicate lifecycle event ignored."
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/handoff-core.sh
-source "$SCRIPT_DIR/lib/handoff-core.sh"
+if [[ "$event" != TaskComplete ]]; then
+  workflow_pause "Cline lifecycle event: $event. Cancellation/shutdown is not successful completion." ||
+    finish "Cannot persist cancellation pause; stop any worker and inspect hook stderr." 1
+fi
 
-handoff_core_run "$SCRIPT_DIR" || true
-echo '{"cancel": false}'
+if ! workflow_read_role; then
+  finish "Cannot reset .cline/.active-role; continuation was not checked. Correct the role marker with file tools." 1
+fi
+if [[ "$WORKFLOW_ROLE" != missing ]]; then
+  if ! printf '%s' none >.cline/.active-role; then
+    finish "Cannot reset .cline/.active-role; continuation was not checked." 1
+  fi
+  workflow_event role_released "previous=$WORKFLOW_ROLE current=none source=$event ownership=$WORKFLOW_OWNERSHIP" ||
+    finish "Role released, but cleanup diagnostic failed; no continuation." 1
+fi
 
-exit 0
+if [[ "$event" == TaskComplete && "$WORKFLOW_OWNERSHIP" == worker ]]; then
+  if ! printf '%s\n' "$AI_SESSION_RUN_ID:$AI_SESSION_ITERATION" >.ai-session/cline-completed; then
+    finish "Cannot record worker completion; continuation was not checked." 1
+  fi
+fi
+if [[ "$event" != TaskComplete ]]; then
+  finish "Workflow interrupted ($event). Continuation paused; inspect affected files and use workflow-status.sh before an explicit auto-continue.sh --resume."
+fi
+handoff_core_run "$SCRIPT_DIR" || finish "$HANDOFF_MESSAGE" 1
+finish "$HANDOFF_MESSAGE"

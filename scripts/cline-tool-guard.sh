@@ -23,7 +23,7 @@
 # state, so it is confirmed to work identically whether the call comes from a
 # resumed task, a brand-new task, the CLI, or the VS Code extension.
 # Workflows release the role to none when finished; terminal lifecycle hooks
-# also clear it before checking continuation. New requests select their role
+# also clear it when ownership permits. New requests select their role
 # with file tools before shell use, including after an unclean shutdown.
 #
 # Vendored, read-only — assumes invocation cwd is the project root (confirmed
@@ -34,12 +34,18 @@ set -uo pipefail
 ROLE_FILE=".cline/.active-role"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/command-policy.sh"
+source "$SCRIPT_DIR/lib/workflow-runtime.sh"
 
 payload="$(cat)"
 tool_name="$(printf '%s' "$payload" | sed -n 's/.*"toolName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
-role=""
-if [[ -e "$ROLE_FILE" || -L "$ROLE_FILE" ]]; then
-  role="$(tr -d '[:space:]' <"$ROLE_FILE" 2>/dev/null || true)"
+[[ "$tool_name" =~ ^[a-zA-Z0-9_]+$ ]] || tool_name=unknown
+role=invalid
+role_valid=false
+if workflow_read_role; then
+  role_valid=true
+  role="$WORKFLOW_ROLE"
+  [[ "$role" != missing ]] || role=""
+  workflow_observe_role || printf 'Role observation could not be persisted; see hook stderr.\n' >&2
 fi
 
 record_diagnostic() {
@@ -57,13 +63,20 @@ record_diagnostic() {
 }
 
 deny() {
-  local reason="$1 The entire tool call was rejected, including all commands in a batch; Cline may end the active task. Do not retry or disguise the denied operation."
+  local reason="$1 The entire tool call was rejected, including all commands in a batch; Cline may end the active task and interrupt companion edits. Re-read affected files before resuming. A later none marker is not the cancellation cause or permission to bypass this workflow. Do not retry or disguise the denied operation."
   record_diagnostic denied "$reason"
-  echo "{\"cancel\": true, \"errorMessage\": \"$reason $DIAGNOSTIC_LOCATION\"}"
+  workflow_event tool_rejected "tool=$tool_name role=${role:-none}; $1" ||
+    printf 'Tool rejection event could not be persisted.\n' >&2
+  workflow_pause "Policy rejection: tool=$tool_name role=${role:-none}. $1" ||
+    printf 'Continuation pause could not be fully persisted; stop the worker explicitly.\n' >&2
+  printf '{"cancel": true, "errorMessage": %s}\n' "$(workflow_json_string "$reason $DIAGNOSTIC_LOCATION Unattended continuation is paused; the developer must resolve the cause and explicitly restart with auto-continue.sh --resume.")"
   exit 0
 }
 
 if [[ "$tool_name" == "run_commands" || "$tool_name" == "execute_command" ]]; then
+  if [[ "$role_valid" != true ]]; then
+    deny "Role marker is invalid or unreadable. Select the intended workflow role using file tools; do not use none to bypass an active workflow."
+  fi
   if [[ "$role" == "planner" || "$role" == "handoff-writer" ]]; then
     deny "The '$role' role does not run shell commands — see .cline/skills/$role/SKILL.md."
   fi

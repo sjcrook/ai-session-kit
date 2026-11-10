@@ -11,8 +11,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/handoff-core.sh
 source "$SCRIPT_DIR/lib/handoff-core.sh"
+source "$SCRIPT_DIR/lib/workflow-runtime.sh"
 
 handoff_core_run "$SCRIPT_DIR"
-echo "{\"systemMessage\": \"$HANDOFF_MESSAGE\"}"
+printf '{"systemMessage": %s}\n' "$(workflow_json_string "$HANDOFF_MESSAGE")"
 
 exit 0

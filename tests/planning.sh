@@ -52,7 +52,7 @@ printf 'Operators: + - * / ^; 2 ^ 3 = 8\n' >docs/functional-spec.md
 expect_rejected 'Specifications differ'
 touch .github/auto-continue-enabled
 handoff_core_run "$KIT_ROOT/scripts"
-[[ "$HANDOFF_MESSAGE" == *'Auto-continue was not started'* ]]
+[[ "$HANDOFF_MESSAGE" == *'No implementation started'* ]]
 [[ "$HANDOFF_MESSAGE" == *'Specifications differ'* ]]
 echo 'PASS: changed specs invalidate approval and prevent hook continuation'
 

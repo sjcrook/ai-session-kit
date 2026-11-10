@@ -33,8 +33,8 @@ echo 'PASS: stop script uses the new runtime PID path'
 
 mkdir .cline
 printf handoff-writer >.cline/.active-role
-result="$(printf '{}' | bash "$KIT_ROOT/scripts/check-handoff-cline.sh")"
-[[ "$result" == '{"cancel": false}' ]]
+result="$(printf '{}' | bash "$KIT_ROOT/scripts/check-handoff-cline.sh" TaskComplete)"
+[[ "$result" == *'"cancel": false'* ]]
 [[ "$(cat .cline/.active-role)" == none ]]
 [[ "$(grep -c ' BLOCKED$' .ai-session/handoff-notifications.log)" == 2 ]]
 rm .cline/.active-role
@@ -45,8 +45,10 @@ project="$TEST_ROOT/lifecycle"
 vendor="$project/external/ai-session-kit/scripts"
 mkdir -p "$vendor/lib" "$project/.cline/hooks" "$project/.clinerules/hooks"
 cp "$KIT_ROOT/scripts/check-handoff-cline.sh" "$vendor/"
+cp "$KIT_ROOT/scripts/lib/workflow-runtime.sh" "$vendor/lib/"
 cat >"$vendor/lib/handoff-core.sh" <<'EOF'
 handoff_core_run() {
+  HANDOFF_MESSAGE="Checked continuation."
   if [[ -e .cline/.active-role ]]; then
     [[ "$(cat .cline/.active-role)" == none ]] || return 1
   fi
@@ -66,7 +68,7 @@ for event in TaskComplete TaskCancel SessionShutdown; do
       for role in planner handoff-writer implementer; do
         printf '%s' "$role" >.cline/.active-role
         result="$(printf '{}' | bash "$hook")"
-        [[ "$result" == '{"cancel": false}' ]]
+        [[ "$result" == *'"cancel": false'* ]]
         [[ "$(cat .cline/.active-role)" == none ]]
         result="$(printf '{"toolName":"run_commands","command":"git status"}' | bash "$KIT_ROOT/scripts/cline-tool-guard.sh")"
         [[ "$result" == '{"cancel": false}' ]]
@@ -76,12 +78,22 @@ for event in TaskComplete TaskCancel SessionShutdown; do
       touch launch-next
       printf handoff-writer >.cline/.active-role
       printf '{}' | bash "$hook" >/dev/null
-      [[ "$(cat .cline/.active-role)" == implementer ]]
+      if [[ "$event" == TaskComplete ]]; then
+        [[ "$(cat .cline/.active-role)" == implementer ]]
+      else
+        [[ "$(cat .cline/.active-role)" == none ]]
+      fi
       rm launch-next .cline/.active-role
       printf '{}' | bash "$hook" >/dev/null
       [[ ! -e .cline/.active-role ]]
-      [[ "$(wc -l <checks | tr -d '[:space:]')" == 6 ]]
-      rm checks
+      if [[ "$event" == TaskComplete ]]; then
+        [[ "$(wc -l <checks | tr -d '[:space:]')" == 6 ]]
+        [[ ! -e .ai-session/continuation-paused ]]
+        rm checks
+      else
+        [[ ! -e checks ]]
+        [[ -s .ai-session/continuation-paused ]]
+      fi
 
       mkdir .cline/.active-role
       if printf '{}' | bash "$hook" >hook-output 2>hook-error; then
@@ -91,12 +103,33 @@ for event in TaskComplete TaskCancel SessionShutdown; do
       grep -F 'Cannot reset .cline/.active-role' hook-error >/dev/null
       [[ ! -e checks ]]
       rmdir .cline/.active-role
+      rm -f .ai-session/continuation-paused
     )
   done
 done
-echo 'PASS: both Cline hook layouts reset terminal roles before continuation, tolerate repeats, and report failures'
+echo 'PASS: both hook layouts distinguish completion from cancellation/shutdown and report cleanup failures'
 
-rm .ai-session/auto-continue.pid .ai-session/handoff-notifications.log
+(
+  cd "$project"
+  export AI_SESSION_RUN_ID=worker-new AI_SESSION_ITERATION=2
+  printf 'worker-new:2\n' >.ai-session/cline-owner
+  printf implementer >.cline/.active-role
+  for identity in worker-old ""; do
+    AI_SESSION_RUN_ID="$identity" bash "$vendor/check-handoff-cline.sh" TaskCancel <<< '{}' >hook-output 2>hook-error
+    [[ "$(cat .cline/.active-role)" == implementer ]]
+    [[ ! -e .ai-session/continuation-paused && ! -e checks ]]
+    grep -F 'ownership mismatch' hook-error >/dev/null
+  done
+  bash "$vendor/check-handoff-cline.sh" TaskComplete <<< '{}' >hook-output
+  [[ "$(cat .cline/.active-role)" == none ]]
+  bash "$vendor/check-handoff-cline.sh" SessionShutdown <<< '{}' >hook-output
+  [[ ! -e .ai-session/continuation-paused ]]
+  [[ "$(wc -l <checks | tr -d '[:space:]')" == 1 ]]
+  grep -F '"event":"role_released"' .ai-session/workflow-events.jsonl >/dev/null
+)
+echo 'PASS: stale/unowned hooks cannot clear a worker role; post-completion shutdown is ignored for its verified iteration'
+
+rm .ai-session/auto-continue.pid .ai-session/handoff-notifications.log .ai-session/workflow-events.jsonl
 rmdir .ai-session
 touch .ai-session
 if bash "$KIT_ROOT/template/project/notify.sh" >failure-output 2>&1; then

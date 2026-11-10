@@ -167,3 +167,5 @@ echo "  1. Use /functional-spec, /technical-spec, and /tasks; explicitly approve
 echo "  2. Implement notify.sh with a real notification (email/Slack/etc)."
 echo "  3. Confirm this repo is vendored at exactly 'external/ai-session-kit' (the Stop hook hardcodes that path)."
 echo "  4. Before unattended container use, mount command-exceptions/ and enforcement paths read-only; see the kit README."
+echo "  5. Check readiness without changing state: bash external/ai-session-kit/scripts/workflow-status.sh"
+echo "     After interruption, inspect affected edits/tests before explicitly restarting with auto-continue.sh --resume."

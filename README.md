@@ -248,8 +248,8 @@ the diagnostic is recorded in `.ai-session/auto-continue.log`.
 The implementer, not the planner, runs `check-planning.sh`.
 
 Cline roles are temporary: skills finish by setting `.cline/.active-role` to
-`none`, and completion/cancellation/shutdown hooks also clear the marker before
-checking continuation. This does not disable command-policy checks. After a
+`none`, and terminal hooks also clear it when ownership permits. Only normal
+completion checks continuation; cancellation/shutdown pause it. This does not disable command-policy checks. After a
 crash, the next request must select its intended role with file tools before
 running any shell command. Do not clear the role to bypass an active restricted
 workflow, or run concurrent Cline tasks/workers in one workspace.
@@ -262,9 +262,49 @@ reason in the task list immediately, rather than waiting for the handoff. A
 `docs/handoff.md` still showing the blank template means no handoff has been
 recorded, not that no work has happened — check `docs/tasks.md`'s actual
 statuses, and treat them as authoritative over a stale "Next" list.
-General conversation does not require a handoff. Installed lifecycle hooks still
-check task state and may notify or launch auto-continue when enabled; these
+General conversation does not require a handoff. Normal completion hooks still
+check task state and may notify or launch auto-continue when enabled and not paused; these
 instructions do not disable those hooks.
+
+### Readiness and recovery guidance
+
+You do not need to memorize a rigid command order. Workflow instructions tell
+the agent to explain missing prerequisites and ask before starting another
+workflow. For example, “implement this” without current planning approval should
+offer planning and approval, not silently rewrite the plan or attempt prohibited
+commands. A handoff before implementation is still valid: it describes the
+actual state.
+
+From the application's root, inspect readiness without changing any state:
+
+```bash
+bash external/ai-session-kit/scripts/workflow-status.sh
+```
+
+The report separates planning/task readiness, the role marker, recorded worker
+state, continuation pauses, and the latest recorded event. `none` is not proof
+that a workflow stopped, nor an explanation of an interruption. Restricted roles
+use native file reads instead of running this shell command.
+
+Role selection, edits, and dependent verification must be separate, sequential
+actions. The planner verifies documents with native file tools; shell checks
+belong to a separately requested implementer/developer phase. Releasing a role
+does not permit bypassing its restrictions.
+
+Cancellation, shutdown, policy rejection, and worker failure persist a pause.
+Inspect the rejected operation and affected edits/tests, resolve the cause, and
+then explicitly restart as the developer:
+
+```bash
+bash external/ai-session-kit/scripts/auto-continue.sh --resume
+```
+
+Ordinary starts and completion hooks cannot clear that pause. The agent must not
+clear it or restart autonomously. `--resume` is an explicit operator action, not
+an authentication mechanism; it rechecks readiness and does not approve planning
+or mark tasks Done. The event log is `.ai-session/workflow-events.jsonl`; it records
+role observations, rejections, lifecycle cleanup, and continuation decisions
+without copying tool payloads. See [runtime diagnostics](supplemental/reference.md#runtime-diagnostics-and-ownership).
 
 ## Add or change functionality
 
@@ -402,8 +442,8 @@ Normal exit and stopping release the lock. A crash or forced kill can leave it
 behind; startup then refuses to launch. See [lock recovery](supplemental/reference.md#continuation-settings)
 before removing it. Never remove a lock while a worker may still be running.
 
-The enable file also allows configured session-end hooks to start a background
-loop after interactive work. Auto-continue is off until you create that file.
+The enable file also allows normal-completion hooks to start a background
+loop after interactive work, unless continuation is paused. Auto-continue is off until you create that file.
 Do not run competing workers in the same workspace.
 
 <details>
@@ -428,7 +468,7 @@ selection overrides and session-end behavior.
 
 ### Stop automation
 
-First remove the enable file to prevent a session-end hook from launching another
+First remove the enable file to prevent normal-completion hooks from launching another
 loop, then stop the recorded loop and its CLI descendants:
 
 ```bash
@@ -438,6 +478,8 @@ external/ai-session-kit/scripts/stop-auto-continue.sh
 
 Removing the enable file alone does **not** stop an existing loop. For an
 interactive session, use the chat stop button or press `Ctrl+C` in the CLI.
+Stopping a running worker also records a continuation pause. Cline's cancellation
+and shutdown hooks do the same; only an explicit `--resume` clears the pause.
 Once the active request has stopped, ask the AI to run the handoff workflow as a
 new request, then close the session. If stopping the CLI exits it, reopen the
 conversation if supported. After an interruption, especially if you must start

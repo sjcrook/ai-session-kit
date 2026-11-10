@@ -4,6 +4,8 @@
 set -uo pipefail
 
 PID_FILE=".ai-session/auto-continue.pid"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/workflow-runtime.sh"
 
 if [[ ! -f "$PID_FILE" ]]; then
   echo "No auto-continue PID file found; no loop is recorded as running."
@@ -29,6 +31,7 @@ if [[ "$process_command" != *"auto-continue.sh"* ]]; then
 fi
 
 # Freeze the loop so it cannot start another iteration while children stop.
+workflow_pause "Developer stopped the auto-continue worker; inspect interrupted work before explicitly restarting." || exit 1
 if ! kill -STOP "$pid"; then
   echo "Failed to pause auto-continue process $pid." >&2
   exit 1

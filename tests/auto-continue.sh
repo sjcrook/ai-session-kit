@@ -8,6 +8,9 @@ cleanup() {
     "$TEST_ROOT/docs/tasks.md" "$TEST_ROOT/.ai-session/auto-continue.log" \
     "$TEST_ROOT/.ai-session/auto-continue.pid" "$TEST_ROOT/.github/auto-continue-enabled" \
     "$TEST_ROOT/.cline/.active-role" "$TEST_ROOT/notify.sh" \
+    "$TEST_ROOT/.ai-session/workflow-events.jsonl" "$TEST_ROOT/.ai-session/continuation-paused" \
+    "$TEST_ROOT/.ai-session/cline-owner" "$TEST_ROOT/.ai-session/cline-completed" \
+    "$TEST_ROOT/.ai-session/last-observed-role" \
     "$TEST_ROOT/calls" "$TEST_ROOT/notifications" "$TEST_ROOT/args" \
     "$TEST_ROOT/release" \
     "$TEST_ROOT/command-exceptions/command-exceptions.conf" \
@@ -56,6 +59,15 @@ case "$MOCK_MODE" in
   abort) printf '\033[2m[abort] aborted by another client\033[0m\n'; exit 0 ;;
   plain-abort) echo '[abort] aborted' >&2; exit 0 ;;
   timeout) echo '[abort] aborted after timeout'; exit 1 ;;
+  policy-rejected)
+    printf planner >.cline/.active-role
+    printf '{"toolName":"run_commands","command":"git status"}' | bash "$KIT_TEST_SCRIPTS/cline-tool-guard.sh"
+    printf '{}' | bash "$KIT_TEST_SCRIPTS/check-handoff-cline.sh" TaskCancel
+    echo 'Rejected but CLI exits zero'
+    exit 0 ;;
+  lifecycle-cancel)
+    printf '{}' | bash "$KIT_TEST_SCRIPTS/check-handoff-cline.sh" TaskCancel
+    exit 0 ;;
   failure) echo 'provider failed' >&2; exit 7 ;;
   stale) echo 'No changes'; exit 0 ;;
   spec-drift)
@@ -118,11 +130,13 @@ run_case() {
   : >"$TEST_ROOT/calls"
   : >"$TEST_ROOT/notifications"
   : >"$TEST_ROOT/args"
-  local status=0
+  rm -f "$TEST_ROOT/.ai-session/continuation-paused"
+  local status=0 limit=4
+  if [[ "$mode" == policy-rejected || "$mode" == lifecycle-cancel ]]; then limit=1; fi
   (
     cd "$TEST_ROOT"
-    PATH="$TEST_ROOT/bin:$PATH" TMPDIR="$TEST_ROOT/tmp" AUTO_CONTINUE_CLI="$cli" \
-      AUTO_CONTINUE_MAX_ITERATIONS=4 MOCK_MODE="$mode" bash "$SCRIPT_DIR/auto-continue.sh"
+    PATH="$TEST_ROOT/bin:$PATH" TMPDIR="$TEST_ROOT/tmp" AUTO_CONTINUE_CLI="$cli" KIT_TEST_SCRIPTS="$SCRIPT_DIR" \
+      AUTO_CONTINUE_MAX_ITERATIONS="$limit" MOCK_MODE="$mode" bash "$SCRIPT_DIR/auto-continue.sh"
   ) || status=$?
   [[ "$status" == "$expected_status" ]]
   [[ "$(wc -l <"$TEST_ROOT/calls" | tr -d ' ')" == "$expected_calls" ]]
@@ -133,13 +147,21 @@ run_case() {
     grep -F 'Auto-continue CLI aborted' "$TEST_ROOT/notifications" >/dev/null
     ! grep -F 'Auto-continue made no progress' "$TEST_ROOT/notifications" >/dev/null
   fi
+  if [[ "$mode" == policy-rejected ]]; then
+    grep -F 'Policy rejection: tool=run_commands role=planner' "$TEST_ROOT/.ai-session/continuation-paused" >/dev/null
+    grep -F '"event":"tool_rejected"' "$TEST_ROOT/.ai-session/workflow-events.jsonl" >/dev/null
+    grep -F '"event":"role_released"' "$TEST_ROOT/.ai-session/workflow-events.jsonl" >/dev/null
+    [[ "$(cat "$TEST_ROOT/.cline/.active-role")" == none ]]
+  fi
   echo "PASS: $cli $mode"
 }
 
 run_case cline abort 1 1 'CLI reported an abort'
 run_case cline plain-abort 1 1 'CLI reported an abort'
 run_case cline timeout 1 1 'CLI reported an abort'
-run_case cline failure 0 1 'CLI returned non-zero'
+run_case cline failure 1 1 'CLI returned non-zero'
+run_case cline policy-rejected 1 1 'continuation paused by'
+run_case cline lifecycle-cancel 1 1 'continuation paused by'
 run_case cline stale 0 2 'no real progress'
 run_case cline progress 0 2 'no unfinished tasks remain'
 run_case cline success 0 1 'no unfinished tasks remain'
@@ -294,3 +316,21 @@ wait "$old_pid"
 printf '%s\n' "$old_pid" >"$TEST_ROOT/.ai-session/auto-continue.pid"
 run_case cline success 0 1 'no unfinished tasks remain'
 echo 'PASS: legacy live PID ownership is preserved and a stale legacy PID is recovered'
+
+printf 'Operator cancellation\n' >"$TEST_ROOT/.ai-session/continuation-paused"
+printf '| S01 | T001 | Example | Todo |\n' >"$TEST_ROOT/docs/tasks.md"
+cp "$TEST_ROOT/docs/tasks.md" "$TEST_ROOT/docs/planning/tasks.md"
+: >"$TEST_ROOT/calls"
+for mode in manual --from-hook; do
+  status=0
+  (cd "$TEST_ROOT"; PATH="$TEST_ROOT/bin:$PATH" AUTO_CONTINUE_CLI=cline \
+    MOCK_MODE=success bash "$SCRIPT_DIR/auto-continue.sh" "$mode") || status=$?
+  [[ "$status" == 1 && ! -s "$TEST_ROOT/calls" ]]
+  [[ -f "$TEST_ROOT/.ai-session/continuation-paused" ]]
+done
+(cd "$TEST_ROOT"; PATH="$TEST_ROOT/bin:$PATH" AUTO_CONTINUE_CLI=cline \
+  MOCK_MODE=success bash "$SCRIPT_DIR/auto-continue.sh" --resume)
+[[ "$(wc -l <"$TEST_ROOT/calls" | tr -d ' ')" == 1 ]]
+[[ ! -e "$TEST_ROOT/.ai-session/continuation-paused" ]]
+grep -F '"event":"continuation_resumed"' "$TEST_ROOT/.ai-session/workflow-events.jsonl" >/dev/null
+echo 'PASS: paused continuation rejects ordinary/hook starts and requires explicit --resume'

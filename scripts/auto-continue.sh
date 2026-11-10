@@ -11,6 +11,17 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/command-policy.sh"
 source "$SCRIPT_DIR/lib/planning-core.sh"
+source "$SCRIPT_DIR/lib/workflow-readiness.sh"
+source "$SCRIPT_DIR/lib/workflow-runtime.sh"
+START_MODE="${1:-manual}"
+case "$START_MODE" in
+  manual|--from-hook|--resume) ;;
+  *) echo "Usage: bash auto-continue.sh [--resume|--from-hook]" >&2; exit 1 ;;
+esac
+if [[ $# -gt 1 ]]; then
+  echo "Usage: bash auto-continue.sh [--resume|--from-hook]" >&2
+  exit 1
+fi
 TASKS_FILE="docs/tasks.md"
 LOG_FILE=".ai-session/auto-continue.log"
 PID_FILE=".ai-session/auto-continue.pid"
@@ -24,7 +35,16 @@ LOCK_DIR=".ai-session/auto-continue.lock"
 MAX_ITERATIONS="${AUTO_CONTINUE_MAX_ITERATIONS:-10}"
 AUTO_CONTINUE_FLAG=".github/auto-continue-enabled"
 
-log() { echo "$(date -u +%FT%TZ) $*" >>"$LOG_FILE"; }
+log() {
+  if ! echo "$(date -u +%FT%TZ) $*" >>"$LOG_FILE"; then
+    printf 'Cannot append worker log: %s\n' "$*" >&2
+    exit 1
+  fi
+  workflow_event worker_decision "$*" || exit 1
+  if [[ "$*" == *"auto-continue: stopping"* ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
 
 if ! mkdir -p .ai-session; then
   echo "Cannot create .ai-session runtime directory." >&2
@@ -55,6 +75,11 @@ fi
 CLI_OUTPUT=""
 OWNS_PID=false
 cleanup() {
+  if [[ -n "${AI_SESSION_RUN_ID:-}" && -f .ai-session/cline-owner ]] &&
+    [[ "$(cat .ai-session/cline-owner)" == "$AI_SESSION_RUN_ID:"* ]]; then
+    rm -f .ai-session/cline-owner .ai-session/cline-completed ||
+      printf 'Cannot remove owned Cline runtime state.\n' >&2
+  fi
   if [[ "$OWNS_PID" == true ]]; then
     rm -f "$PID_FILE" || log "auto-continue: could not remove owned PID file $PID_FILE"
   fi
@@ -64,8 +89,8 @@ cleanup() {
   rmdir "$LOCK_DIR" || log "auto-continue: could not release runtime lock $LOCK_DIR"
 }
 trap cleanup EXIT
-trap 'exit 143' TERM
-trap 'exit 130' INT
+trap 'workflow_pause "Worker terminated by TERM; verify interrupted work before restarting."; exit 143' TERM
+trap 'workflow_pause "Worker interrupted by INT; verify interrupted work before restarting."; exit 130' INT
 
 # Also honor workers started by older kit versions without a lock directory.
 if [[ -f "$PID_FILE" ]]; then
@@ -85,6 +110,18 @@ if ! echo "$$" >"$PID_FILE"; then
   exit 1
 fi
 OWNS_PID=true
+export AI_SESSION_RUN_ID="worker-$$-$(date -u +%s)"
+if [[ -e .ai-session/continuation-paused ]]; then
+  if [[ "$START_MODE" != --resume ]]; then
+    log "auto-continue: stopping — continuation is paused; inspect workflow-status.sh, resolve the cause, then explicitly restart with --resume"
+    exit 1
+  fi
+  if ! rm .ai-session/continuation-paused; then
+    log "auto-continue: stopping — cannot clear continuation pause"
+    exit 1
+  fi
+  workflow_event continuation_resumed "Explicit --resume requested; prior pause cleared, readiness will be checked again." || exit 1
+fi
 
 CLI="${AUTO_CONTINUE_CLI:-}"
 if [[ -z "$CLI" && -f "$AUTO_CONTINUE_FLAG" ]]; then
@@ -112,6 +149,7 @@ fi
 PROMPT="Read AGENTS.md, docs/functional-spec.md, docs/technical-spec.md, docs/tasks.md, and docs/handoff.md. Work exactly the next Todo or In Progress task in docs/tasks.md following the TDD/sprint methodology in AGENTS.md — if it's already In Progress, verify real state (git status/diff, test run) before resuming rather than assuming the prior session left it in a working state. Use file-editing tools to create or edit source and tests, never shell writes (including printf/echo redirection, heredocs, or interpreter-based writes). This applies even when the content contains no denied command. If file-editing tools are unavailable, report the limitation and mark the task Blocked. Do not bypass a denied command. Write an acceptance test first. For new or changed behavior, confirm it fails because the required behavior is missing, then write the minimal implementation. For regression-only tasks covering existing behavior, a correct test may pass immediately; preserve the working implementation and record that no implementation change or red phase was needed. Never manufacture a failure by using incorrect expectations or temporarily breaking working code. Run the tests before setting its status to Done in docs/tasks.md. Update docs/handoff.md before finishing. If you cannot complete the task, set its status to Blocked with a reason in docs/tasks.md instead of guessing."
 PROMPT+=" The git push, rm -rf, and sudo deny-list applies to direct commands too, including temporary cleanup and test setup, unless the operator grants the corresponding named exception in command-exceptions/command-exceptions.conf. Never create, edit, or redirect that operator policy or its enforcement files. Using an operator-granted exception is permitted. An unapproved match anywhere in a batch rejects the entire tool call and may end the Cline task. Prefer established test fixtures; plan cleanup of session-created artifacts using explicitly identified individual files and then empty directories. Never retry or disguise a denied operation with alternate spellings, interpreters, or wrappers. When resuming after a denial, check .ai-session/auto-continue.log (or hook stderr if logging was unavailable) and verify real state; do not assume any rejected batch ran. After the operator changes permission, reassess only the affected blocker and rerun necessary validation. Cancellation is not completion; report a necessary operation with no permitted workflow as a blocker."
 PROMPT+=" Before selecting or changing any task, run bash external/ai-session-kit/scripts/check-planning.sh. If approval is missing or stale, stop and request /tasks and explicit approval; never approve or edit docs/planning/ yourself. Never select Superseded work."
+PROMPT+=" Follow the Readiness and Steering contract in AGENTS.md. Explain missing prerequisites and ask before starting another workflow. Never batch role selection, edits, and dependent verification: wait for each result. A none marker after interruption is not the cause or permission to bypass restrictions. Report completion, waiting for approval, blocked, cancelled, policy-rejected, or failed accurately."
 
 # Runs one iteration; preserves the CLI exit code and detects Cline aborts,
 # which can be reported in output even when the process exits successfully.
@@ -157,8 +195,13 @@ run_agent_cli() {
     # otherwise a session that last used the planner or handoff-writer role
     # would leave the continuation loop wrongly blocked from running shell
     # commands at all.
-    mkdir -p .cline
-    printf 'implementer' >.cline/.active-role
+    if ! mkdir -p .cline ||
+      ! printf '%s\n' "$AI_SESSION_RUN_ID:$AI_SESSION_ITERATION" >.ai-session/cline-owner ||
+      ! printf 'implementer' >.cline/.active-role; then
+      log "auto-continue: stopping — cannot initialize implementer role and ownership"
+      exit 1
+    fi
+    workflow_event role_selected "current=implementer source=worker; owner=$AI_SESSION_RUN_ID:$AI_SESSION_ITERATION" || exit 1
 
     # Headless mode triggers automatically because stdout is redirected below.
     # NOTE: deny-listing dangerous commands here via an env var doesn't work —
@@ -192,27 +235,26 @@ prev_tasks_content=""
 stale_count=0
 
 for ((i = 1; i <= MAX_ITERATIONS; i++)); do
-  if ! planning_check; then
-    log "auto-continue: stopping — $PLANNING_ERROR"
+  export AI_SESSION_ITERATION="$i"
+  if [[ -e .ai-session/continuation-paused ]]; then
+    log "auto-continue: stopping — continuation paused by cancellation, shutdown, or policy rejection; explicit --resume required"
+    exit 1
+  fi
+  workflow_readiness || exit 1
+  if [[ "$WORKFLOW_STATE" == planning-required ]]; then
+    log "auto-continue: stopping — $WORKFLOW_REASON No implementation started. $WORKFLOW_NEXT"
     if [[ -x ./notify.sh ]]; then
-      ./notify.sh "Planning approval required" "$PLANNING_ERROR No agent was launched for this iteration." || log "auto-continue: planning approval notification failed"
+      ./notify.sh "Planning approval required" "$WORKFLOW_REASON No agent was launched for this iteration. $WORKFLOW_NEXT" || log "auto-continue: planning approval notification failed"
     fi
     exit 1
   fi
   # Task rows start "| S<sprint> | T<task> |" — anchored so this doesn't also match the legend line.
-  if awk -F '|' '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ { sub(/^[^[:alnum:]]*/, "", $5); if ($5 ~ /^Blocked([[:space:]]|$)/) found=1 } END { exit !found }' "$TASKS_FILE"; then
+  if [[ "$WORKFLOW_STATE" == blocked ]]; then
     log "auto-continue: stopping — Blocked task found after iteration $((i - 1))"
     "$SCRIPT_DIR/check-handoff.sh" >>"$LOG_FILE" 2>&1
     exit 0
   fi
-  # Single-process check (no pipe): under `set -o pipefail`, a two-stage
-  # `grep | grep -q` here would be racy — `grep -q` exits as soon as it finds
-  # a match, which can SIGPIPE the upstream grep before it finishes writing,
-  # and pipefail then reports that SIGPIPE as the pipeline's failure status
-  # even though a real unfinished task was found. That flips this check's
-  # sense and makes the loop stop early, claiming "no unfinished tasks
-  # remain" while rows further down the file are still Todo.
-  if ! awk -F '|' '/^\| *S[0-9]+ *\| *T[0-9]+ *\|/ { sub(/^[^[:alnum:]]*/, "", $5); if ($5 !~ /^(Done|Superseded)([[:space:]]|$)/) found=1 } END { exit !found }' "$TASKS_FILE"; then
+  if [[ "$WORKFLOW_STATE" == complete ]]; then
     log "auto-continue: stopping — no unfinished tasks remain"
     exit 0
   fi
@@ -244,20 +286,26 @@ for ((i = 1; i <= MAX_ITERATIONS; i++)); do
   log "auto-continue: iteration $i finished with exit code $ret"
 
   if [[ "$cli_aborted" == true ]]; then
+    workflow_pause "$CLI CLI reported an abort during iteration $i; task completion was interrupted." || exit 1
     log "auto-continue: stopping — $CLI CLI reported an abort (exit code $ret); task completion was interrupted"
     if [[ -x ./notify.sh ]]; then
       ./notify.sh "Auto-continue CLI aborted" "Cline reported an abort during auto-continue iteration $i (exit code $ret). This is not successful task completion. Check .ai-session/auto-continue.log and Cline's session diagnostics for the cancellation source before restarting; do not run competing clients against the same session." || true
     fi
     exit 1
   fi
+  if [[ -e .ai-session/continuation-paused ]]; then
+    log "auto-continue: stopping — continuation paused by cancellation, shutdown, or policy rejection; explicit --resume required"
+    exit 1
+  fi
 
   if [[ $ret -ne 0 ]]; then
+    workflow_pause "$CLI CLI failed with exit code $ret; verify interrupted work." || exit 1
     log "auto-continue: stopping — $CLI CLI returned non-zero"
     # A CLI crash doesn't necessarily leave a BLOCKED task for check-handoff.sh to find, so notify directly.
     if [[ -x ./notify.sh ]]; then
       ./notify.sh "Auto-continue CLI failed" "The $CLI CLI exited $ret during auto-continue iteration $i. See .ai-session/auto-continue.log." || true
     fi
-    exit 0
+    exit 1
   fi
 
   prev_tasks_content="$current_tasks_content"

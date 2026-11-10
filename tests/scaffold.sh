@@ -77,6 +77,23 @@ for event in TaskComplete TaskCancel SessionShutdown; do
   done
 done
 echo 'PASS: role cleanup, startup recovery, and both lifecycle hook layouts are installed'
+for event in TaskComplete TaskCancel SessionShutdown; do
+  for path in ".cline/hooks/$event.sh" ".clinerules/hooks/$event"; do
+    grep -F "check-handoff-cline.sh\" $event" "$project/$path" >/dev/null
+  done
+done
+for skill in planner tasks handoff handoff-writer recover-handoff prepare-resume implementer functional-spec technical-spec; do
+  grep -F 'Readiness and Steering' "$project/.cline/skills/$skill/SKILL.md" >/dev/null
+done
+for constraint in '## Readiness and Steering' \
+  'Do not start a different workflow without asking' \
+  'Never batch role selection, workflow edits, and dependent verification together' \
+  'Do not infer the cancellation cause from the current role marker' \
+  'Never clear the pause or invoke `--resume` autonomously'; do
+  grep -F "$constraint" "$project/AGENTS.md" >/dev/null
+done
+grep -F 'workflow-status.sh' "$TEST_ROOT/output" >/dev/null
+echo 'PASS: readiness steering, sequential phases, and explicit lifecycle events are installed'
 
 for path in .github/prompts/tasks.prompt.md .github/agents/planner.agent.md \
   .cline/skills/tasks/SKILL.md .cline/skills/planner/SKILL.md; do

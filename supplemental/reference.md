@@ -501,14 +501,22 @@ They cannot reconstruct progress that the AI has not saved.
 
 Copilot Chat's `Stop` hook calls the kit's `check-handoff.sh`. Cline's
 `TaskComplete`, `TaskCancel`, and `SessionShutdown` hooks call
-`check-handoff-cline.sh`. Both use `lib/handoff-core.sh` to:
+`check-handoff-cline.sh`, with the event name supplied by the wrapper. Normal
+completion uses `lib/handoff-core.sh` to:
 
-1. Notify if any saved task row is Blocked.
-2. Otherwise launch auto-continue if enabled and unfinished tasks remain.
-3. Otherwise report that there is nothing to launch.
+1. Refuse continuation if an interruption pause is present.
+2. Notify if any saved task row is Blocked.
+3. Check shared planning/task readiness; launch only when approved, enabled,
+   unfinished work remains, and no live recorded worker exists.
+4. Otherwise explain why no worker was started.
 
-Cancellation can therefore trigger a continuation attempt while enabled.
-Disable the enable file before stopping workers or intervening manually.
+Cline cancellation/shutdown never launch continuation. They persist a pause,
+as do guard rejections, CLI abort/failure, and stopping a live worker.
+Disable the enable file before intervening manually.
+Copilot's generic Stop callback does not establish whether the developer
+cancelled; do not claim Cline-specific cancellation detection for that surface.
+Use `stop-auto-continue.sh` for the worker and disable launching before
+cancelling interactive Copilot work.
 The continuation loop drives successive Copilot CLI invocations directly;
 it does not depend on the VS Code Chat Stop hook. CLI repository-hook support
 depends on the installed version and folder trust. Do not infer that the Chat
@@ -524,6 +532,53 @@ for trusted shell-compatible configuration.
 |---|---|
 | `.ai-session/auto-continue.log` | Worker output, continuation decisions, guard diagnostics |
 | `.ai-session/handoff-notifications.log` | Blocker notifications and notification-stub activity |
+| `.ai-session/workflow-events.jsonl` | Structured role observations, tool rejections, lifecycle events, and continuation decisions |
+
+### Runtime diagnostics and ownership
+
+Run `bash external/ai-session-kit/scripts/workflow-status.sh` from the application
+root for a read-only summary. It uses the same planning/task readiness checks as
+continuation and never repairs markers, locks, approval, or task statuses.
+Readiness is not evidence that current acceptance tests pass.
+
+Events include UTC time, event name, process ID, worker run/iteration when
+available, and a diagnostic description. Commands, tool payloads, and
+file contents are not copied into this event stream. The existing worker output
+log can still contain CLI output; protect it accordingly.
+
+`role_observed` records a change seen at PreToolUse, not proof of who wrote it.
+`role_selected` identifies worker initialization; `role_released` identifies
+hook cleanup. `lifecycle_received`, `lifecycle_ownership`, `lifecycle_ignored`,
+`tool_rejected`, and continuation events distinguish rejection from later cleanup.
+Logging failures are reported on stderr; lifecycle handlers skip continuation
+when their required diagnostics or cleanup cannot be persisted.
+
+Worker descendants inherit a run/iteration identity, stored in
+`.ai-session/cline-owner`. A mismatched or unowned terminal hook cannot clear a
+worker-owned marker or trigger continuation. A verified iteration's shutdown
+after TaskComplete is ignored as a duplicate. Worker cleanup removes only its
+own ownership records. This is coordination, not independent authorization.
+
+Interactive Cline hook identity has not been verified. Those events explicitly
+report unavailable ownership and rely on one active workflow per workspace;
+late interactive events cannot be proven safe against another interactive
+workflow. Do not infer identity from arbitrary hook JSON or claim concurrent
+workflow support. Hooks omitted by a crash/forced kill cannot be reconstructed.
+
+`.ai-session/continuation-paused` preserves the first interruption reason until
+restart; later cancellation/abort events remain in the event stream rather than
+overwriting the original rejection.
+Normal starts and hooks refuse to continue while it exists. After inspecting
+affected files/tests and resolving the cause, the developer runs:
+
+```bash
+bash external/ai-session-kit/scripts/auto-continue.sh --resume
+```
+
+Only this explicit start clears the pause; planning, blockers, command policy,
+and worker locking are still checked. An agent is instructed never to clear the
+pause or invoke this restart autonomously. Older scaffolded wrappers that omit
+an event name are treated as unknown interruptions: update both hook layouts.
 
 ### Task status conventions
 
@@ -562,8 +617,8 @@ Roles are temporary workflow state, not the next session's default. Workflows
 release their role by writing `none` with a file-editing tool as their final file
 operation, including when stopping for an unmet precondition. The Cline
 TaskComplete, TaskCancel, and SessionShutdown handler also resets an existing
-marker before checking blockers or launching continuation. A reset failure is
-reported on stderr and skips the continuation check. Auto-continue still selects
+marker when ownership permits. Only TaskComplete checks continuation; the other
+events pause it. A reset failure is reported and skips the continuation check. Auto-continue still selects
 `implementer` before launching its next Cline task.
 
 A crash or forced termination may skip cleanup hooks. Before any shell command,
@@ -683,6 +738,9 @@ Review actual changes, tests and saved state before enabling unattended work.
 | `scripts/check-handoff*.sh` | Session-end entry points |
 | `scripts/lib/handoff-core.sh` | Shared blocker/notification/launch logic |
 | `scripts/lib/command-policy.sh` | Shared operator policy reader |
+| `scripts/lib/workflow-runtime.sh` | Structured diagnostics, continuation pause, and worker hook ownership |
+| `scripts/lib/workflow-readiness.sh` | Shared planning/task readiness and next-step guidance |
+| `scripts/workflow-status.sh` | Read-only developer readiness and recovery summary |
 | `template/project/` | Files copied into the application |
 | `template/create-scaffold-kit.sh` | Scaffold installation and preservation |
 | `template/gitignore.append` | Application ignore entries |
@@ -694,6 +752,7 @@ bash tests/cline-tool-guard.sh
 bash tests/auto-continue.sh
 bash tests/scaffold.sh
 bash tests/runtime-state.sh
+bash tests/workflow-status.sh
 ```
 
 They use synthetic payloads, mock CLIs, and temporary scaffold targets, without

@@ -6,6 +6,8 @@ TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ai-session-kit-guard-test.XXXXXX")"
 cleanup() {
   chmod u+r "$TEST_ROOT/command-exceptions/command-exceptions.conf" 2>/dev/null || true
   rm -f "$TEST_ROOT/.cline/.active-role" "$TEST_ROOT/.ai-session/auto-continue.log" "$TEST_ROOT/guard.stderr" \
+    "$TEST_ROOT/.ai-session/workflow-events.jsonl" "$TEST_ROOT/.ai-session/last-observed-role" \
+    "$TEST_ROOT/.ai-session/continuation-paused" \
     "$TEST_ROOT/command-exceptions/command-exceptions.conf"
   rmdir "$TEST_ROOT/command-exceptions"
   rmdir "$TEST_ROOT/.cline" "$TEST_ROOT/.ai-session" "$TEST_ROOT"
@@ -31,6 +33,11 @@ editor_payload='{"toolName":"editor","toolInput":{"path":"tests/unit/output.bats
 result="$(printf '%s' "$editor_payload" | bash "$SCRIPT_DIR/cline-tool-guard.sh")"
 [[ "$result" == '{"cancel": false}' ]]
 echo 'PASS: editor can write test content'
+grep -F '"event":"tool_rejected"' .ai-session/workflow-events.jsonl >/dev/null
+grep -F '"event":"role_observed"' .ai-session/workflow-events.jsonl >/dev/null
+grep -F 'Policy rejection:' .ai-session/continuation-paused >/dev/null
+! grep -F 'must-not-be-logged' .ai-session/workflow-events.jsonl >/dev/null
+echo 'PASS: rejection pauses continuation and structured events omit payloads'
 
 for command in 'rm -rf /example' 'git push origin main' 'sudo example'; do
   result="$(printf '{"toolName":"execute_command","command":"%s"}' "$command" | bash "$SCRIPT_DIR/cline-tool-guard.sh")"
@@ -93,8 +100,16 @@ for state in missing empty none; do
 done
 echo 'PASS: missing, empty, and neutral roles allow orientation without bypassing command policy'
 
+printf malformed >.cline/.active-role
+result="$(printf '%s' "$editor_payload" | bash "$SCRIPT_DIR/cline-tool-guard.sh" 2>guard.stderr)"
+[[ "$result" == '{"cancel": false}' ]]
+result="$(printf '%s' '{"toolName":"run_commands","command":"git status"}' | bash "$SCRIPT_DIR/cline-tool-guard.sh" 2>guard.stderr)"
+[[ "$result" == *'"cancel": true'* && "$result" == *'Role marker is invalid or unreadable'* ]]
+echo 'PASS: invalid role blocks shell execution without blocking native-file repair'
+
 printf implementer >.cline/.active-role
 rm -f .ai-session/auto-continue.log
+rm .ai-session/workflow-events.jsonl .ai-session/last-observed-role .ai-session/continuation-paused
 rmdir .ai-session
 touch .ai-session
 result="$(printf '%s' "$cleanup_payload" | bash "$SCRIPT_DIR/cline-tool-guard.sh" 2>guard.stderr)"
