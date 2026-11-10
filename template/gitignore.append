@@ -1,5 +1,6 @@
 .env
 /.ai-session/
 .github/auto-continue-enabled
+.github/auto-continue-DISABLED
 .cline/.active-role
 /command-exceptions/
