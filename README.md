@@ -565,9 +565,10 @@ revision and refresh the scaffold:
 
 ```bash
 git submodule update --remote --depth 1 external/ai-session-kit
+git add external/ai-session-kit
+git commit -m "chore: update ai-session-kit" # the pointer bump is a real commit in the consumer repo
 external/ai-session-kit/template/create-scaffold-kit.sh
 ```
-
 Review the changes and merge any existing scaffold files reported as different,
 especially project instructions and the Cline implementer skill. Files that were
 auto-merged (an untouched file fast-forwarded, or a non-conflicting local edit
