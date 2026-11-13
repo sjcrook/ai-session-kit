@@ -53,8 +53,7 @@ Add the kit as a Git submodule: a dependency stored at a specific revision insid
 your project.
 
 ```bash
-git submodule add <this-repo-url> external/ai-session-kit
-git submodule update --init --recursive
+git submodule add --depth 1 <this-repo-url> external/ai-session-kit
 external/ai-session-kit/template/create-scaffold-kit.sh
 ```
 
@@ -100,22 +99,23 @@ combined file is logically correct.
 
 ### Opening a project that already includes the kit
 
-Do **not** add the submodule again. Download the project and its recorded
-dependencies:
+Do **not** add the submodule again. Clone the project and initialize its immediate submodules:
 
 ```bash
-git clone --recurse-submodules <your-application-repository-url>
+git clone <your-application-repository-url>
+cd <your-project>
+git submodule update --init --depth 1
 ```
 
-If you already cloned without submodules, run this inside that clone:
+If you already cloned the project without initialising its submodules, run this from the project root:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init --depth 1
 ```
 
-Then run the scaffold command above to create any missing local files, including
-the default approval policy. A new clone contains committed project files, not
-ignored files such as credentials or local approvals.
+This checks out the submodules at the commits recorded by the project, without initialising any nested submodules they might contain.
+
+Then run the scaffold command above to create any missing local files, including the default approval policy. A new clone contains committed project files, not ignored files such as credentials or local approvals.
 
 ## Run your first session
 
@@ -564,7 +564,7 @@ Stop workers. From the application's root **on the host**, fetch a newer kit
 revision and refresh the scaffold:
 
 ```bash
-git submodule update --remote external/ai-session-kit
+git submodule update --remote --depth 1 external/ai-session-kit
 external/ai-session-kit/template/create-scaffold-kit.sh
 ```
 
